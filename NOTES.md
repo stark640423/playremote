@@ -169,6 +169,9 @@ Windows 上用 HID API 讀報告格式：直接 `CreateFile` 開這些 collectio
   → macOS 認得出它是 HID 裝置，配對失敗的原因不在廣播內容。晶片很可能是 Realtek 而非 Telink。
 - `probe.py pair`：CoreBluetooth 看得到的所有可讀特徵值都**不需要加密**即可讀取，
   因此無法靠讀取誘發系統配對對話框。HID 服務被 CoreBluetooth 隱藏，無法從 App 端觸發配對。
+- **iPhone 實測（2026-10-14）**：iOS 設定點 PlayRemote 後顯示「已連線」，但列表項**沒有 ⓘ**（其他已配對裝置都有），
+  按鍵在 iPhone 上無反應 → iOS 同樣只建立 LE 連線、未完成 bonding。確認是 Apple 平台共通的行為，與 Mac 環境無關。
+  下一步只剩：Bluetooth Explorer 強制配對 / PacketLogger 看 SMP 原因；或從 PC 讀廣播 Appearance、`2A01`、`2A4A` 找 Apple 拒絕的條件。
 - 結論：只剩系統設定的「連接」這一條路；失敗原因需要 PacketLogger 或 Apple 藍牙日誌描述檔才看得到。
 
 
