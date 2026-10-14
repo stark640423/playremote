@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "playremote"
+version = "0.1.0"
+description = "Open-source driver for the PlayRemote BLE voice remote: custom hotkeys per key and hold-to-talk voice input (Windows now, macOS planned)."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "bleak>=1.0",
+    'sounddevice; sys_platform == "win32"',
+    'numpy; sys_platform == "win32"',
+    'pycaw; sys_platform == "win32"',
+    'pyobjc-framework-Speech; sys_platform == "darwin"',
+    'pyobjc-framework-Quartz; sys_platform == "darwin"',
+]
+
+[project.scripts]
+playremote = "playremote:main"
+
+[tool.setuptools]
+py-modules = ["playremote", "rawinput", "winio", "audio", "virtualmic", "probe", "atvv_probe", "hidwatch", "stt"]

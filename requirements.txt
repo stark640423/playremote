@@ -1,0 +1,5 @@
+bleak>=1.0
+pyobjc-framework-Speech; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
+sounddevice; sys_platform == "win32"
+pycaw; sys_platform == "win32"

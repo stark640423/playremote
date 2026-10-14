@@ -1,0 +1,57 @@
+# PlayRemote 驅動設定。複製成 config.toml 再改。
+
+[remote]
+name = "PlayRemote"             # 遙控器的藍牙名稱；驅動會在已配對的裝置裡自動找
+address = ""                    # 有多隻時可以指定 MAC，例如 "AA:BB:CC:DD:EE:FF"；留空 = 自動
+reconnect_seconds = 5           # 斷線 / 找不到時幾秒重試一次
+
+[voice]
+# builtin : 錄音 → 跑 [voice.stt] 的指令辨識 → 把文字打進目前視窗 (沒設指令就只存 WAV)
+# hotkey  : 語音鍵變成另一個語音輸入 App 的熱鍵 (那個 App 用電腦自己的麥克風錄音)
+# none    : 只存 WAV
+#
+# hotkey 模式常見設定:
+#   SogaType (預設 F8，設定「切換」模式)    hotkey = "f8",   hotkey_style = "tap"
+#   SogaType 設定成「按住說話」模式          hotkey = "f8",   hotkey_style = "hold"
+#   Windows 內建語音輸入 (Win+H，切換)       hotkey = "win+h", hotkey_style = "tap"
+#   其他 App: 看它的熱鍵是「按一下開始/再按一下結束」就用 tap，「按住說話」就用 hold
+mode = "hotkey"
+hotkey = "f8"             # mode=hotkey 時用的鍵；可以是組合鍵 "ctrl+win"
+hotkey_style = "tap"      # hold: 按下時 key down、放開時 key up；tap: 按下和放開時各按一下
+save_wav = true           # 是否把每段錄音存到 captures/voice-*.wav
+min_seconds = 0.3         # 短於這個秒數的錄音直接丟掉 (誤觸)
+
+# 把遙控器的麥克風變成電腦的麥克風 (hotkey 模式用)。需要先裝虛擬音訊線 VB-CABLE (https://vb-audio.com/Cable/)。
+# 語音鍵按下 → 預設麥克風切成 CABLE Output、遙控器的聲音灌進 CABLE Input → 語音輸入 App 直接錄到遙控器的聲音 → 放開後切回原本的麥克風。
+[voice.virtual_mic]
+enabled = false
+playback = "CABLE Input"    # 虛擬線的播放端名稱 (片段即可)
+capture = "CABLE Output"    # 虛擬線的錄音端名稱 (片段即可)
+
+[voice.stt]
+# 外部辨識指令，{wav} 會換成錄音檔路徑，程式讀 stdout 當結果。留空 = 不辨識。
+# whisper.cpp 例子 (16 kHz WAV 可直接餵):
+#   command = 'C:\tools\whisper\whisper-cli.exe -m C:\tools\whisper\ggml-small.bin -l zh -nt -np -f {wav}'
+command = ""
+type_result = true        # 把辨識結果打進目前視窗
+append = ""               # 打完文字後再送的鍵，例如 "enter"
+
+# 按鍵對應。鍵名 (見 NOTES.md 對照表):
+#   up down left right ok back home menu power 1 2 3 4 5 6 7 8 9 0 backspace wheel_up wheel_down
+# 動作 (擇一): run = "指令" / keys = "ctrl+shift+v" / text = "要打的字"
+# block = true 時擋掉原本的鍵 (數字鍵不會打出數字、ok 不會變 Enter)；沒設定的鍵照常當一般鍵盤。
+# on = "down" (預設, 按下時觸發) 或 "up" (放開時觸發)
+[input]
+double_click_ms = 600   # 雙擊: 兩次按下的間隔上限
+long_press_ms = 500     # 長按: 按住超過這麼久
+
+[keys]
+# 每個鍵可設 single (單擊) / double (雙擊) / long (長按) 三種動作。
+# 只設單擊的鍵在「按下」當下就觸發 (最快)；有設雙擊的鍵，單擊要等雙擊窗過了才觸發。
+"1" = { block = true, single = { run = "notepad" }, double = { keys = "win+d" }, long = { run = "calc" } }
+"2" = { keys = "win+d", block = true }          # 只有單擊時可以直接寫動作
+ok = { keys = "enter" }
+back = { keys = "esc", block = true }
+home = { block = true, single = { keys = "win+d" }, double = { run = "explorer" } }
+menu = { keys = "apps", block = true }
+power = { block = true }                        # 只擋掉，避免 Windows 睡眠
