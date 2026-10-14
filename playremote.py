@@ -40,7 +40,8 @@ except Exception as _e:  # noqa: BLE001  (沒裝 sounddevice / pycaw 時仍可�
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-HERE = Path(__file__).parent
+# 打包成 exe (PyInstaller) 時，設定檔與 captures/ 放在 exe 旁邊；原始碼執行時放在這個檔案旁邊
+HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 BATTERY_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 GESTURES = ("single", "double", "long")
 GESTURE_NAME = {"single": "單擊", "double": "雙擊", "long": "長按"}
@@ -375,7 +376,8 @@ class Driver:
 
 def load_config(path: Path) -> dict:
     if not path.exists():
-        example = HERE / "config.example.toml"
+        # PyInstaller 打包時範本在 _internal (sys._MEIPASS)，原始碼執行時在本檔旁邊
+        example = Path(getattr(sys, "_MEIPASS", HERE)) / "config.example.toml"
         shutil.copy(example, path)
         log(f"沒有 {path.name}，已從 config.example.toml 複製一份，請視需要修改")
     with path.open("rb") as f:

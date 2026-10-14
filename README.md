@@ -25,8 +25,16 @@ progress and roadmap in [STATUS.md](STATUS.md). Everything below is in Tradition
 
 ## 安裝（Windows）
 
-1. 在「設定 → 藍牙與裝置」配對 PlayRemote（長按遙控器的 Home + 返回或依說明書進入配對模式）。配對後它會被 Windows 當成鍵盤／滑鼠。
-2. 安裝 Python 3.11 以上，然後：
+1. 在「設定 → 藍牙與裝置」配對 PlayRemote（依說明書進入配對模式）。配對後它會被 Windows 當成鍵盤／滑鼠。
+2. 到 [Releases](https://github.com/stark640423/playremote/releases) 下載 `PlayRemote-Setup-<版本>.exe` 執行即可
+   （裝到使用者資料夾，不需要系統管理員；也有免安裝的 `PlayRemote-portable-<版本>.zip`）。
+   安裝程式沒有簽章，第一次執行若出現 SmartScreen 警告，按「其他資訊 → 仍要執行」。
+3. 開始功能表的「PlayRemote」啟動驅動，「編輯設定 (config.toml)」改按鍵對應；改完重新啟動驅動。
+   安裝時可勾選「開機時自動啟動」。
+
+### 從原始碼執行
+
+安裝 Python 3.11 以上，然後：
 
 ```powershell
 git clone https://github.com/stark640423/playremote.git
@@ -37,8 +45,19 @@ copy config.example.toml config.toml
 .venv\Scripts\python playremote.py -v
 ```
 
-3. 第一次先用 `-v` 看每個鍵的事件，確認對應沒問題後拿掉。
-4. 想讓其他語音 App 錄到遙控器的聲音：安裝 [VB-CABLE](https://vb-audio.com/Cable/)，在 `config.toml` 的 `[voice.virtual_mic]` 設 `enabled = true`。
+第一次先用 `-v` 看每個鍵的事件，確認對應沒問題後拿掉。
+
+想讓其他語音 App 錄到遙控器的聲音：安裝 [VB-CABLE](https://vb-audio.com/Cable/)，在 `config.toml` 的 `[voice.virtual_mic]` 設 `enabled = true`。
+
+### 自己打包
+
+```powershell
+.venv\Scripts\pip install pyinstaller
+.venv\Scripts\pyinstaller --noconfirm --clean --name PlayRemote --console playremote.py --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-all pycaw --collect-all comtypes --collect-all sounddevice --hidden-import numpy --add-data "config.example.toml;."
+iscc installer\playremote.iss      # 需要 Inno Setup 6，產出 dist\PlayRemote-Setup-<版本>.exe
+```
+
+推 `v*` 標籤到 GitHub 會由 Actions 自動打包並建立 Release（`.github/workflows/release.yml`）。
 
 `config.toml` 的格式與說明見 [config.example.toml](config.example.toml)。驅動會自動找已配對、名稱是 PlayRemote 的裝置；有多隻時在 `[remote] address` 填 MAC。
 
