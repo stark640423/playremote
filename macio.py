@@ -124,17 +124,16 @@ def type_text(text: str):
 
 
 def run(command: str):
-    """啟動程式。
-    - 以 .app 結尾或存在於 /Applications 的名稱 → open -a
-    - 其他 → 當 shell 指令執行 (不等待)
+    """啟動程式或指令。
+    先試 `open -a <名稱>`（macOS 會自己找遍 /Applications、/System/Applications/Utilities 等位置，
+    也接受完整路徑和 .app）；找不到對應的 App 才當 shell 指令執行（不等待）。
     """
     cmd = command.strip()
-    if cmd.endswith(".app") or cmd.startswith("/Applications/"):
-        subprocess.Popen(["open", "-a", cmd])
+    if not cmd:
         return
-    import os
-    for d in ("/Applications", "/System/Applications", os.path.expanduser("~/Applications")):
-        if os.path.exists(os.path.join(d, cmd + ".app")) or os.path.exists(os.path.join(d, cmd)):
-            subprocess.Popen(["open", "-a", cmd])
+    looks_like_shell = any(ch in cmd for ch in (" -", "|", "&&", ";", "$", "~")) and not cmd.endswith(".app")
+    if not looks_like_shell:
+        r = subprocess.run(["open", "-a", cmd], capture_output=True)
+        if r.returncode == 0:
             return
     subprocess.Popen(cmd, shell=True)
