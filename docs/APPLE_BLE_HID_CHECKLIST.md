@@ -15,6 +15,14 @@
 
 結論：Apple 沒有把 PlayRemote 當成「可配對的輸入裝置」。下列各項請逐一核對。標 ★ 的是最可能的原因。
 
+## Mac 端能不能自己發起配對？（已驗證：不能）
+
+`pair_spi_mac.py` 實測：一般程序可以取得 CoreBluetooth 私有的 `CBPairingAgent` 並呼叫 `pairPeer:options:`，
+但 bluetoothd 日誌顯示第三方程序向 bluetoothd 報到時 `fProgrammaticPairing 0`（系統設定 / BTLEServer 為 `1`），
+配對請求根本不會被處理。這個能力由 Apple 私有 entitlement 控制，第三方 App 無法取得。
+kext 已停用、DriverKit 無藍牙 HCI 類別，也無法從更底層接管。
+→ **Mac 上的藍牙配對只能靠系統設定，而系統設定的判斷條件在遙控器的廣播內容，所以解法只在韌體。**
+
 ## 1. 廣播（Advertising / Scan Response）
 
 | 項目 | 要求 | PlayRemote 現況 |

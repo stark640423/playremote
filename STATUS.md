@@ -29,7 +29,7 @@
 | 設定介面（`gui.py`） | **完成**（v0.2.0）：遙控器照片熱點、每鍵單擊/雙擊/長按、語音鍵選項、連線與電量、儲存即套用 |
 | 安裝程式 | **完成**：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
 | 系統匣 | **完成**：關閉視窗縮到系統匣，選單可重啟驅動、開機自啟、結束 |
-| macOS 版 | 只有探測工具（`probe.py`、`audio.py`、`stt.py`）。配對卡在系統設定一直轉圈，待解 |
+| macOS 版 | 探測工具齊全。**藍牙：已確認為韌體問題**（Appearance 在掃描回應且為 0x0180，設定頁不分類為 HID；第三方 App 無法發起配對，見 `docs/APPLE_BLE_HID_CHECKLIST.md`）。**USB 接收器：按鍵/陀螺儀/滾輪/麥克風實測可用**，Mac 版以此為主 |
 | 彩色四鍵、滑鼠圖示鍵 | 不送任何訊號給電腦（HID、ATVV、自訂服務都沒有），應為紅外線或本機功能，無法對應 |
 
 ## 2026-10-14 重大發現：USB 2.4G 接收器模式
