@@ -101,14 +101,33 @@ class DriverWorker(QThread):
 
 # ---------------------------------------------------------------- 遙控器圖
 class RemoteView(QWidget):
-    """用 QPainter 畫的遙控器示意圖；按下的鍵會短暫亮起。"""
+    """遙控器圖（assets/remote.png，沒有就畫示意圖）；按下的鍵會短暫亮起，點圖上的鍵會選到對應卡片。"""
+
+    # 鍵名 → (x, y, 半徑)，相對於圖寬 / 圖高的比例
+    HOTSPOTS = {
+        "up": (0.502, 0.081, 0.05), "down": (0.502, 0.242, 0.05), "left": (0.345, 0.162, 0.05),
+        "right": (0.660, 0.162, 0.05), "ok": (0.502, 0.162, 0.065),
+        "back": (0.350, 0.336, 0.055), "home": (0.502, 0.336, 0.055), "power": (0.655, 0.336, 0.055),
+        "1": (0.350, 0.414, 0.05), "2": (0.502, 0.414, 0.05), "3": (0.655, 0.414, 0.05),
+        "4": (0.350, 0.475, 0.05), "5": (0.502, 0.475, 0.05), "6": (0.655, 0.475, 0.05),
+        "7": (0.350, 0.535, 0.05), "8": (0.502, 0.535, 0.05), "9": (0.655, 0.535, 0.05),
+        "menu": (0.350, 0.598, 0.05), "0": (0.502, 0.598, 0.05), "backspace": (0.655, 0.598, 0.05),
+        "mouse": (0.350, 0.682, 0.055), "voice": (0.655, 0.682, 0.055),
+        "blue": (0.502, 0.780, 0.06), "green": (0.374, 0.838, 0.06), "red": (0.630, 0.838, 0.06),
+        "yellow": (0.502, 0.904, 0.06),
+    }
+    clicked = Signal(str)
 
     def __init__(self):
         super().__init__()
-        self.setMinimumSize(170, 520)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumSize(200, 520)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.active: set[str] = set()
         self._timers: dict[str, QTimer] = {}
+        img = Path(getattr(sys, "_MEIPASS", HERE)) / "assets" / "remote.png"
+        self.pixmap = QPixmap(str(img)) if img.exists() else None
+        self.setMouseTracking(True)
+        self._hover = None
 
     def flash(self, name: str):
         self.active.add(name)
@@ -121,61 +140,56 @@ class RemoteView(QWidget):
             self._timers[name] = t
         t.start(350)
 
-    def _btn(self, p, rect: QRectF, name: str, label: str = "", color: str = "#ffffff", fg: str = "#333"):
-        p.setPen(QPen(QColor("#c9c9ce"), 1))
-        p.setBrush(QBrush(QColor("#4f8cff") if name in self.active else QColor(color)))
-        p.drawEllipse(rect)
-        if label:
-            p.setPen(QColor("#ffffff") if name in self.active else QColor(fg))
-            p.drawText(rect, Qt.AlignCenter, label)
+    def _geometry(self):
+        """回傳 (繪圖矩形)：圖等比例縮到控件內。"""
+        if self.pixmap is None:
+            return QRectF(0, 0, self.width(), self.height())
+        pw, ph = self.pixmap.width(), self.pixmap.height()
+        scale = min(self.width() / pw, self.height() / ph)
+        w, h = pw * scale, ph * scale
+        return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+
+    def _spot_rect(self, name: str) -> QRectF:
+        g = self._geometry()
+        x, y, r = self.HOTSPOTS[name]
+        rr = r * g.width()
+        return QRectF(g.x() + x * g.width() - rr, g.y() + y * g.height() - rr, 2 * rr, 2 * rr)
+
+    def _hit(self, pos) -> str | None:
+        for name in self.HOTSPOTS:
+            if self._spot_rect(name).contains(pos):
+                return name
+        return None
+
+    def mouseMoveEvent(self, ev):
+        h = self._hit(ev.position())
+        if h != self._hover:
+            self._hover = h
+            self.setCursor(Qt.PointingHandCursor if h else Qt.ArrowCursor)
+            self.update()
+
+    def mousePressEvent(self, ev):
+        h = self._hit(ev.position())
+        if h:
+            self.flash(h)
+            self.clicked.emit(h)
 
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        bw = min(w - 10, 160)
-        x0 = (w - bw) / 2
-        scale = bw / 160
-        body = QRectF(x0, 5, bw, h - 10)
-        p.setPen(QPen(QColor("#b8b8bd"), 1.5))
-        p.setBrush(QColor("#fafafa"))
-        p.drawRoundedRect(body, bw / 2, bw / 2)
-        f = QFont()
-        f.setPointSizeF(9 * scale)
-        p.setFont(f)
-        cx = x0 + bw / 2
-        # 方向盤
-        ring = QRectF(cx - 60 * scale, 25 * scale, 120 * scale, 120 * scale)
-        p.setPen(QPen(QColor("#c9c9ce"), 1))
-        p.setBrush(QColor("#f0f0f2"))
-        p.drawEllipse(ring)
-        for name, (dx, dy) in {"up": (0, -42), "down": (0, 42), "left": (-42, 0), "right": (42, 0)}.items():
-            r = QRectF(cx + dx * scale - 14 * scale, ring.center().y() + dy * scale - 14 * scale, 28 * scale, 28 * scale)
-            self._btn(p, r, name, {"up": "︿", "down": "﹀", "left": "〈", "right": "〉"}[name], "#f0f0f2")
-        self._btn(p, QRectF(cx - 22 * scale, ring.center().y() - 22 * scale, 44 * scale, 44 * scale), "ok", "OK")
-        # 返回 / Home / 電源
-        y = 165 * scale
-        for i, (name, label, fg) in enumerate([("back", "↶", "#333"), ("home", "⌂", "#333"), ("power", "⏻", "#e53935")]):
-            self._btn(p, QRectF(cx + (i - 1) * 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), name, label, fg=fg)
-        # 數字
-        grid = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["menu", "0", "backspace"]]
-        for r_, row in enumerate(grid):
-            for c_, name in enumerate(row):
-                label = {"menu": "≡", "backspace": "⌫"}.get(name, name)
-                rect = QRectF(cx + (c_ - 1) * 46 * scale - 16 * scale, (215 + r_ * 40) * scale, 32 * scale, 32 * scale)
-                self._btn(p, rect, name, label)
-        # 滑鼠 / LED / 麥克風
-        y = 385 * scale
-        self._btn(p, QRectF(cx - 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), "mouse", "🖱")
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#e53935"))
-        p.drawRoundedRect(QRectF(cx - 12 * scale, y + 13 * scale, 24 * scale, 8 * scale), 4, 4)
-        self._btn(p, QRectF(cx + 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), "voice", "🎤")
-        # 彩色鍵
-        y = 450 * scale
-        for name, (dx, dy, col) in {"blue": (0, -22, "#2f3cc9"), "green": (-34, 8, "#2e9e4f"),
-                                     "red": (34, 8, "#e53935"), "yellow": (0, 38, "#f2c01f")}.items():
-            self._btn(p, QRectF(cx + dx * scale - 13 * scale, y + dy * scale, 26 * scale, 26 * scale), name, "", col)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        g = self._geometry()
+        if self.pixmap is not None:
+            p.drawPixmap(g.toRect(), self.pixmap)
+        else:
+            p.setPen(QPen(QColor("#b8b8bd"), 1.5))
+            p.setBrush(QColor("#fafafa"))
+            p.drawRoundedRect(g.adjusted(10, 5, -10, -5), 60, 60)
+        for name in self.HOTSPOTS:
+            if name in self.active or name == self._hover:
+                p.setPen(QPen(QColor(79, 140, 255), 3))
+                p.setBrush(QColor(79, 140, 255, 90 if name in self.active else 40))
+                p.drawEllipse(self._spot_rect(name))
         p.end()
 
 
@@ -420,9 +434,8 @@ class MainWindow(QMainWindow):
         left.addStretch()
         cols.addWidget(self._scroll(left), 4)
         self.remote = RemoteView()
-        mid = QVBoxLayout()
-        mid.addWidget(self.remote, 0, Qt.AlignHCenter)
-        cols.addLayout(mid, 2)
+        self.remote.clicked.connect(self._on_remote_click)
+        cols.addWidget(self.remote, 3)
         right = QVBoxLayout()
         self.voice_card = VoiceCard(self.cfg["voice"])
         self.voice_card.changed.connect(self._mark_dirty)
@@ -504,6 +517,19 @@ class MainWindow(QMainWindow):
     def _on_log(self, line: str):
         self.logview.appendPlainText(line)
         self.statusline.setText(line[10:])
+
+    def _on_remote_click(self, name: str):
+        card = self.cards.get(name)
+        if card:
+            card.highlight(True)
+            QTimer.singleShot(600, lambda: card.highlight(False))
+            sa = card.parent()
+            while sa is not None and not isinstance(sa, QScrollArea):
+                sa = sa.parent()
+            if sa is not None:
+                sa.ensureWidgetVisible(card)
+        elif name == "voice":
+            self.voice_card.setFocus()
 
     def _on_key(self, name: str, gesture: str):
         self.remote.flash(name)

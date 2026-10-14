@@ -27,7 +27,7 @@ jobs:
           pyinstaller --noconfirm --clean --name PlayRemote --windowed gui.py
           --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt
           --collect-all pycaw --collect-all comtypes --collect-all sounddevice --hidden-import numpy
-          --add-data "config.example.toml;."
+          --add-data "config.example.toml;." --add-data "assets;assets"
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
