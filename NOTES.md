@@ -162,6 +162,16 @@ Windows 上用 HID API 讀報告格式：直接 `CreateFile` 開這些 collectio
   `BleakClient(..., winrt={"use_cached_services": False})` 可避免。
 - macOS：目前配對卡在系統設定一直轉圈，HID 服務因此沒建立。Windows 一次就配對成功，所以是 macOS 端流程問題，不是協定問題。
 
+### 2026-10-14 macOS 配對診斷紀錄
+
+- 乾淨環境（Windows 藍牙關閉、遙控器拔電池後長按進配對模式）下，Mac 掃描結果：
+  `PlayRemote`，-31 dBm，**廣播內列出服務 1812**，廠商資料 `0x005D`（Realtek）`55 66 55 88`。
+  → macOS 認得出它是 HID 裝置，配對失敗的原因不在廣播內容。晶片很可能是 Realtek 而非 Telink。
+- `probe.py pair`：CoreBluetooth 看得到的所有可讀特徵值都**不需要加密**即可讀取，
+  因此無法靠讀取誘發系統配對對話框。HID 服務被 CoreBluetooth 隱藏，無法從 App 端觸發配對。
+- 結論：只剩系統設定的「連接」這一條路；失敗原因需要 PacketLogger 或 Apple 藍牙日誌描述檔才看得到。
+
+
 ## 虛擬麥克風（Windows）
 
 - 需要虛擬音訊線（VB-CABLE）。`virtualmic.py` 把解碼後的 PCM 播到 CABLE Input，Windows 就在 CABLE Output 聽到；
