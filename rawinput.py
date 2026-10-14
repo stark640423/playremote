@@ -26,6 +26,8 @@ hid = ctypes.windll.hid
 
 WM_INPUT = 0x00FF
 RIDEV_INPUTSINK = 0x00000100
+RIDEV_REMOVE = 0x00000001
+ERROR_CLASS_ALREADY_EXISTS = 1410
 RID_INPUT = 0x10000003
 RIDI_DEVICENAME = 0x20000007
 RIDI_PREPARSEDDATA = 0x20000005
@@ -137,6 +139,9 @@ u32.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c
                                 ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
 u32.CreateWindowExW.restype = w.HWND
 u32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+u32.DestroyWindow.argtypes = [w.HWND]
+u32.SetClassLongPtrW.argtypes = [w.HWND, ctypes.c_int, ctypes.c_void_p]
+u32.SetClassLongPtrW.restype = ctypes.c_void_p
 u32.PeekMessageW.argtypes = [ctypes.POINTER(w.MSG), w.HWND, w.UINT, w.UINT, w.UINT]
 u32.DispatchMessageW.argtypes = [ctypes.POINTER(w.MSG)]
 u32.DispatchMessageW.restype = LRESULT
@@ -329,7 +334,10 @@ class RawInputListener:
         wc.lpszClassName = "PlayRemoteRawInput"
         wc.hInstance = k32.GetModuleHandleW(None)
         if not u32.RegisterClassW(ctypes.byref(wc)):
-            raise OSError(f"RegisterClass 失敗: {ctypes.GetLastError()}")
+            if ctypes.GetLastError() != ERROR_CLASS_ALREADY_EXISTS:      # 同一程式內重啟驅動: 類別已在，沿用
+                raise OSError(f"RegisterClass 失敗: {ctypes.GetLastError()}")
+            u32.SetClassLongPtrW(u32.CreateWindowExW(0, wc.lpszClassName, "tmp", 0, 0, 0, 0, 0, HWND_MESSAGE, None,
+                                                     wc.hInstance, None), -24, ctypes.cast(self._wndproc, ctypes.c_void_p).value)
         self.hwnd = u32.CreateWindowExW(0, wc.lpszClassName, "playremote", 0, 0, 0, 0, 0, HWND_MESSAGE,
                                         None, wc.hInstance, None)
         if not self.hwnd:
@@ -340,6 +348,16 @@ class RawInputListener:
         if not u32.RegisterRawInputDevices(rids, len(self.TARGETS), ctypes.sizeof(RAWINPUTDEVICE)):
             raise OSError(f"RegisterRawInputDevices 失敗: {ctypes.GetLastError()}")
         self.list_devices()
+
+    def stop(self):
+        """取消 Raw Input 註冊並銷毀訊息視窗（重啟驅動前呼叫）。"""
+        if self.hwnd:
+            rids = (RAWINPUTDEVICE * len(self.TARGETS))()
+            for r, (page, usage) in zip(rids, self.TARGETS):
+                r.usUsagePage, r.usUsage, r.dwFlags, r.hwndTarget = page, usage, RIDEV_REMOVE, None
+            u32.RegisterRawInputDevices(rids, len(self.TARGETS), ctypes.sizeof(RAWINPUTDEVICE))
+            u32.DestroyWindow(self.hwnd)
+            self.hwnd = None
 
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == WM_INPUT:

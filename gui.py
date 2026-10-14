@@ -76,6 +76,7 @@ class DriverWorker(QThread):
     log = Signal(str)
     status = Signal(bool, object)
     key = Signal(str, str)
+    crashed = Signal(str)
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -88,9 +89,10 @@ class DriverWorker(QThread):
         try:
             self.driver = playremote.Driver(self.cfg, on_status=lambda c, b: self.status.emit(c, b),
                                             on_key=lambda n, g: self.key.emit(n, g))
-            asyncio.run(self.driver.run())
+            playremote.run_blocking(self.driver)
         except Exception as e:  # noqa: BLE001
             self.log.emit(f"驅動停止: {type(e).__name__}: {e}")
+            self.crashed.emit(f"{type(e).__name__}: {e}")
         finally:
             if handler in playremote.LOG_HANDLERS:
                 playremote.LOG_HANDLERS.remove(handler)
@@ -507,6 +509,7 @@ class MainWindow(QMainWindow):
         self.worker.log.connect(self._on_log)
         self.worker.status.connect(self._set_status)
         self.worker.key.connect(self._on_key)
+        self.worker.crashed.connect(self._on_crash)
         self.worker.start()
         self.statusline.setText("驅動啟動中…")
 
@@ -515,6 +518,11 @@ class MainWindow(QMainWindow):
             self.worker.stop()
             self.worker.wait(30000)
         self.worker = None
+
+    def _on_crash(self, msg: str):
+        self.device.setText("<b>驅動已停止</b><br>⚠ 發生錯誤，請看「記錄」")
+        self.logview.setVisible(True)
+        QMessageBox.warning(self, APP_NAME, f"驅動發生錯誤而停止：" + chr(10) + msg + chr(10) * 2 + "修正設定後按「儲存並套用」或從系統匣「重新啟動驅動」。")
 
     def _on_log(self, line: str):
         self.logview.appendPlainText(line)

@@ -53,7 +53,7 @@ copy config.example.toml config.toml
 
 ```powershell
 .venv\Scripts\pip install pyinstaller
-.venv\Scripts\pyinstaller --noconfirm --clean --name PlayRemote --windowed gui.py --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-all pycaw --collect-all comtypes --collect-all sounddevice --hidden-import numpy --add-data "config.example.toml;." --add-data "assets;assets"
+.venv\Scripts\pyinstaller --noconfirm --clean --name PlayRemote --windowed gui.py --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-all pycaw --collect-all comtypes --collect-all sounddevice --collect-all numpy --add-data "config.example.toml;." --add-data "assets;assets"
 iscc installer\playremote.iss      # 需要 Inno Setup 6，產出 dist\PlayRemote-Setup-<版本>.exe
 ```
 

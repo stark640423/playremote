@@ -121,13 +121,16 @@ class Driver:
             if VirtualMic is None:
                 log(f"虛擬麥克風不可用 (缺套件): {_VMIC_IMPORT_ERROR}")
             else:
-                vm = VirtualMic(vm_cfg.get("playback", "CABLE Input"), vm_cfg.get("capture", "CABLE Output"),
-                                log=lambda m: log(f"  vmic: {m}"))
-                log(f"虛擬麥克風: {vm.describe()}")
-                if vm.available:
-                    self.vmic = vm
-                else:
-                    log("虛擬麥克風不可用，語音鍵只會送熱鍵 (請安裝 VB-CABLE，或在 [voice.virtual_mic] 指定正確的裝置名稱)")
+                try:
+                    vm = VirtualMic(vm_cfg.get("playback", "CABLE Input"), vm_cfg.get("capture", "CABLE Output"),
+                                    log=lambda m: log(f"  vmic: {m}"))
+                    log(f"虛擬麥克風: {vm.describe()}")
+                    if vm.available:
+                        self.vmic = vm
+                    else:
+                        log("虛擬麥克風不可用，語音鍵只會送熱鍵 (請安裝 VB-CABLE，或在 [voice.virtual_mic] 指定正確的裝置名稱)")
+                except Exception as e:  # noqa: BLE001
+                    log(f"虛擬麥克風初始化失敗，語音鍵只會送熱鍵: {type(e).__name__}: {e}")
 
     # ---------------- 按鍵 ----------------
     def start_input(self):
@@ -358,7 +361,16 @@ class Driver:
                                  winrt={"use_cached_services": False})
             try:
                 log(f"連線 {addr} ...")
-                await client.connect()
+                # 遙控器休眠時 connect() 會一直等到它醒來，而且 WinRT 的操作不一定理會取消，
+                # 所以不直接 await 它：輪詢等待，收到停止就放棄這個 task
+                ctask = asyncio.ensure_future(client.connect())
+                while not ctask.done() and not self._stop:
+                    await asyncio.wait({ctask}, timeout=0.5)
+                if not ctask.done():
+                    ctask.cancel()
+                    log("停止驅動 (放棄等待中的連線)")
+                    break
+                ctask.result()
                 self.connected = True
                 self._notify_status()
                 log("已連線，送 GET_CAPS 1.0 (語音鍵: 按住說話)")
@@ -378,6 +390,9 @@ class Driver:
                     await asyncio.sleep(0.1)
                     await mic.tick()
                 log("遙控器斷線" if not self._stop else "停止驅動，斷開連線")
+            except asyncio.CancelledError:
+                log("停止驅動")
+                self._stop = True
             except Exception as e:  # noqa: BLE001
                 log(f"連線失敗: {type(e).__name__}: {str(e)[:120]}")
             finally:
@@ -386,7 +401,7 @@ class Driver:
                 self._notify_status()
                 try:
                     if client.is_connected:
-                        await client.disconnect()
+                        await asyncio.wait_for(asyncio.shield(client.disconnect()), 5)
                 except Exception:  # noqa: BLE001
                     pass
             if not self._stop:
@@ -401,17 +416,40 @@ class Driver:
     async def run(self):
         self.loop = asyncio.get_running_loop()
         self.start_input()
+        self._tasks = [asyncio.ensure_future(self.pump_loop()), asyncio.ensure_future(self.ble_loop())]
         try:
-            await asyncio.gather(self.pump_loop(), self.ble_loop())
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         finally:
             self.blocker.stop()
+            self.listener.stop()
             if self.vmic:
                 self.vmic.stop()
                 self.vmic.restore_default()
 
     def request_stop(self):
-        """從別的執行緒呼叫：讓 run() 收尾結束 (GUI 重新載入設定時用)。"""
+        """從別的執行緒呼叫：讓 run() 收尾結束 (GUI 重新載入設定時用)。連線中也會被取消。"""
         self._stop = True
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(lambda: [t.cancel() for t in self._tasks if not t.done()])
+
+
+def run_blocking(driver: "Driver"):
+    """在目前執行緒跑驅動直到它停止。不用 asyncio.run：它收尾時會等所有 task，
+    而放棄的 WinRT 連線 task 可能永遠不回來；這裡最多等 3 秒就關掉迴圈。"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(driver.run())
+    finally:
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for t in pending:
+            t.cancel()
+        if pending:
+            try:
+                loop.run_until_complete(asyncio.wait(pending, timeout=3))
+            except Exception:  # noqa: BLE001
+                pass
+        loop.close()
 
 
 def load_config(path: Path) -> dict:
@@ -432,9 +470,9 @@ def main():
     cfg = load_config(Path(args.config))
     drv = Driver(cfg, verbose=args.verbose)
     try:
-        asyncio.run(drv.run())
+        run_blocking(drv)
     except KeyboardInterrupt:
-        pass
+        drv.request_stop()
     finally:
         drv.blocker.stop()
         if drv.vmic:
