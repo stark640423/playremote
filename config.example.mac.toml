@@ -1,0 +1,50 @@
+# PlayRemote 驅動設定（macOS，USB 接收器模式）。複製成 config.toml 再改。
+# 欄位與 Windows 版相同，差別只在動作裡的程式名與鍵名是 macOS 的寫法。
+
+[remote]
+# macOS 目前走 USB 接收器 (VID 0x0610 / PID 0x1000)，不需要藍牙配對。
+transport = "usb"
+
+[voice]
+# hotkey  : 語音鍵變成另一個語音輸入 App 的熱鍵；那個 App 的麥克風請選系統裡的「PlayRemote」(接收器的 USB 麥克風)
+# builtin : 按住時從 PlayRemote 麥克風錄音，放開後用 macOS 內建離線辨識 (或 [voice.stt] 的指令) 轉文字，打進目前視窗
+# none    : 只存 WAV
+#
+# hotkey 模式常見設定:
+#   SogaType (Fn 按住說話)                 hotkey = "fn",   hotkey_style = "hold"
+#   豆包 / 其他 Fn 長按工具                 hotkey = "fn",   hotkey_style = "hold"
+#   Typeless (Fn 點一下開始、再點結束)      hotkey = "fn",   hotkey_style = "tap"
+#   macOS 內建聽寫 (預設按兩下 Ctrl)       hotkey = "ctrl", hotkey_style = "double"
+mode = "hotkey"
+hotkey = "fn"
+hotkey_style = "hold"     # hold: 按下時 key down、放開時 key up；tap: 按下和放開各按一下；double: 按下時連按兩下
+usb_key = "search"        # 接收器模式下哪個鍵當語音鍵 (實測語音鍵送的是 Consumer 0x221 = search)
+mic = "PlayRemote"        # builtin 模式錄音用的輸入裝置名稱 (片段即可)
+save_wav = false
+min_seconds = 0.3
+
+[voice.stt]
+# builtin 模式的辨識。command 留空 = 用 macOS 內建離線辨識 (stt.py)；或填外部指令，{wav} 會換成錄音檔路徑。
+command = ""
+lang = "zh-TW"
+type_result = true
+append = ""               # 打完文字後再送的鍵，例如 "enter"
+
+[input]
+enabled = true
+double_click_ms = 600
+long_press_ms = 500
+
+# 鍵名: up down left right ok back home menu power 1 2 3 4 5 6 7 8 9 0 backspace
+#       volume_up volume_down mute play_pause search wheel_up wheel_down
+# 動作: run = "程式名或 shell 指令" / keys = "cmd+shift+v" / text = "要打的字"
+# block = true 擋掉原本的鍵 (數字鍵不會打出數字)；同一個介面只要有一個鍵 block，整個介面就會被獨占，
+# 其他沒設定的鍵由驅動補送回系統，效果等同沒擋。
+[keys]
+"1" = { block = true, single = { run = "Claude" }, long = { run = "Terminal" } }
+"2" = { block = true, single = { keys = "cmd+space" } }
+ok = { keys = "enter" }
+back = { keys = "esc", block = true }
+home = { block = true, single = { keys = "cmd+tab" } }
+menu = { keys = "cmd+shift+/", block = true }
+power = { block = true }
