@@ -5,6 +5,7 @@
   probe.py scan                      掃描附近的 BLE 裝置
   probe.py dump  [--name PlayRemote]  連線並列出所有 Service / Characteristic
   probe.py watch [--name PlayRemote]  連線、訂閱所有 notify，印出原始位元組
+  probe.py pair  [--name PlayRemote]  (macOS) 逐一讀取特徵值，誘發系統配對對話框
                                       (同時寫入 captures/*.log)
 
 macOS 上 bleak 看到的是 CoreBluetooth UUID，不是 MAC 位址，所以用名稱比對。
@@ -305,15 +306,43 @@ async def cmd_poke(args):
         print("實驗結束。")
 
 
+async def cmd_pair(args):
+    """macOS 配對實驗：逐一讀取所有可讀特徵值，找出需要加密 (配對) 才能讀的那些。
+
+    CoreBluetooth 遇到需要加密的讀取會自己跳出配對對話框，有時比系統設定的「連接」更容易成功。
+    結果同時能告訴我們哪些服務被設定成「需要 bonding」。
+    """
+    async with open_client(args.name) as client:
+        print(f"已連線: {client.address}。開始逐一讀取，若跳出配對對話框請按「連線」。\n")
+        need_auth = []
+        for svc in client.services:
+            for ch in svc.characteristics:
+                if "read" not in ch.properties:
+                    continue
+                label = f"{svc.uuid[:8]}/{ch.uuid[:8]} (h{ch.handle})"
+                try:
+                    val = await client.read_gatt_char(ch)
+                    print(f"  讀取 OK   {label}: {bytes(val).hex(' ')[:60]}")
+                except Exception as e:  # noqa: BLE001
+                    msg = str(e)
+                    flag = "需要加密?" if any(k in msg.lower() for k in ("auth", "encrypt", "insufficient", "0x5", "0xf")) else ""
+                    print(f"  讀取失敗 {label}: {msg}  {flag}")
+                    if flag:
+                        need_auth.append(label)
+                await asyncio.sleep(0.2)
+        print("\n需要加密才能讀的特徵值:", need_auth or "沒有 (CoreBluetooth 看得到的服務都不需要配對)")
+        print("請接著觀察：系統設定 → 藍牙 裡 PlayRemote 有沒有進到「我的裝置」。")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("scan")
-    for n in ("dump", "watch", "poke"):
+    for n in ("dump", "watch", "poke", "pair"):
         sp = sub.add_parser(n)
         sp.add_argument("--name", default=DEFAULT_NAME)
     args = p.parse_args()
-    fn = {"scan": cmd_scan, "dump": cmd_dump, "watch": cmd_watch, "poke": cmd_poke}[args.cmd]
+    fn = {"scan": cmd_scan, "dump": cmd_dump, "watch": cmd_watch, "poke": cmd_poke, "pair": cmd_pair}[args.cmd]
     try:
         asyncio.run(fn(args))
     except KeyboardInterrupt:
