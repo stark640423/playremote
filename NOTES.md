@@ -198,3 +198,18 @@ python virtualmic.py          # 虛擬麥克風自我測試
 ```
 
 `captures/` 不在 repo 裡（紀錄檔含錄音）。
+
+## USB 2.4G 接收器（VID 0x0610 / PID 0x1000）的 HID 報告格式（2026-10-14 macOS 實測）
+
+介面：USB Audio（麥克風 16 kHz）、HID page1/usage2 滑鼠、HID page1/usage5 遊戲控制器（內含鍵盤集合）、HID page12/usage1 Consumer、HID page 0xFF00 vendor。
+
+| 報告 | 長度 | 內容 | 觸發 |
+|---|---|---|---|
+| `0xC4` | 11 | `c4 80 80 80 80 00…` 每 0.5 s 一次的閒置心跳（搖桿置中） | 無，忽略 |
+| `0xC5` | 9 | 最後一個 byte 是**標準鍵盤 usage**：`4f`右 `50`左 `51`下 `52`上，`1e`–`27` = 1–9,0，`2a` 退格；放開送全 0 | 方向、數字、退格。**macOS 會當真鍵盤打字**，驅動需獨占裝置 |
+| Consumer `id=2` | 3 | `02 LL HH`，usage 小端 16 bit；放開送 `02 00 00` | `0x41` OK、`0x224` 返回、`0x223` Home、`0x40` 選單、`0x30` 電源、`0xE9/0xEA` 音量＋/－、`0xCD` 播放暫停、`0x221` AC Search（待確認是否為語音鍵） |
+| 滑鼠 `id=0` | 6 | `00 XL XH YL YH W`：X/Y 相對位移（小端 16 bit），W 滾輪 ±1 | 陀螺儀、滾輪。macOS 原生就能用 |
+| vendor `0xFF00` | 32 | `0b 28 fe 00 0b 0X 28 fe…` / `0b 00 00 00 7b cc 0a…` 類似狀態與計數 | 非按鍵，用途未知 |
+
+在 macOS 上這條路**不需要藍牙配對**；按鍵可用 IOHIDManager（`hidwatch_mac.py` 的做法）攔截，
+語音輸入法直接選「PlayRemote」USB 麥克風。
