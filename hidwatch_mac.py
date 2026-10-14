@@ -92,9 +92,15 @@ def main():
     cf.CFDictionarySetValue(match, cfstr("ProductID"), cfnum(a.pid))
     iokit.IOHIDManagerSetDeviceMatching(mgr, match)
 
+    prev = {}
+
     def on_report(ctx, result, sender, rtype, report_id, data, length):
         page, usage = LAST.get(sender, ("?", "?"))
         raw = bytes(data[:length])
+        # 接收器每 0.5 秒送一次內容相同的閒置心跳 (id 196)，和上一筆相同就不印
+        if prev.get((sender, report_id)) == raw:
+            return
+        prev[(sender, report_id)] = raw
         t = time.monotonic() - START
         print(f"{t:8.3f}  page=0x{page:02x} usage=0x{usage:02x}  id={report_id:<3} len={length:<2} {raw.hex(' ')}")
 
