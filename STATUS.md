@@ -63,6 +63,10 @@ Windows 版也可評估同樣走 USB（鍵盤攔截問題可能一併消失）�
    替代方案是微軟開源的 SysVAD / SimpleAudioSample 自行編譯簽章。
 7. macOS 版：先解決配對，再移植驅動（CoreBluetooth + IOKit HID）。
 
+## 重要背景
+
+PlayRemote 是**自家公司的產品**，韌體可改。Apple 平台配對問題的解法以「改韌體」為主，
+檢查清單見 `docs/APPLE_BLE_HID_CHECKLIST.md`。網路上查不到型號是正常的。
+
 ## 尚未取得的資訊
 
-- PlayRemote 的來源：背面標籤或附屬機上盒型號。查不到任何叫 PlayRemote 的產品。
