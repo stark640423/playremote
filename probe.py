@@ -11,6 +11,7 @@
 macOS 上 bleak 看到的是 CoreBluetooth UUID，不是 MAC 位址，所以用名稱比對。
 Windows 上遙控器配對後會被系統接住 (HID)，不再廣播，所以直接用 MAC 位址連線。
 """
+from __future__ import annotations
 import argparse
 import asyncio
 import os

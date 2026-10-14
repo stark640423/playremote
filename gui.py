@@ -6,6 +6,7 @@
 視窗裡：遙控器圖、每個鍵的單擊 / 雙擊 / 長按動作、語音鍵設定、連線狀態與電量。
 驅動 (playremote.Driver) 在背景執行緒跑；按「儲存並套用」會寫回 config.toml 並重新啟動驅動。
 """
+from __future__ import annotations
 import argparse
 import asyncio
 import os

@@ -12,6 +12,7 @@
 
 設定檔格式見 config.example.toml。Ctrl+C 結束。
 """
+from __future__ import annotations
 import argparse
 import asyncio
 import shutil

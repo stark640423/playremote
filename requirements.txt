@@ -5,3 +5,4 @@ sounddevice
 numpy
 pycaw; sys_platform == "win32"
 PySide6; sys_platform == "win32"
+tomli; python_version < "3.11"
