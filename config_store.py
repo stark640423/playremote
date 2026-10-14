@@ -37,7 +37,9 @@ def _v(v) -> str:
 
 
 def example_path(here: Path) -> Path:
-    return Path(getattr(sys, "_MEIPASS", here)) / "config.example.toml"
+    base = Path(getattr(sys, "_MEIPASS", here))
+    mac = base / "config.example.mac.toml"
+    return mac if sys.platform == "darwin" and mac.exists() else base / "config.example.toml"
 
 
 def load(path: Path, here: Path) -> dict:

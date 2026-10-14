@@ -4,5 +4,5 @@ pyobjc-framework-Quartz; sys_platform == "darwin"
 sounddevice
 numpy
 pycaw; sys_platform == "win32"
-PySide6; sys_platform == "win32"
+PySide6
 tomli; python_version < "3.11"

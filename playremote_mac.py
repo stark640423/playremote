@@ -291,9 +291,21 @@ class Driver:
                 if self.on_status:
                     self.on_status(n > 0, None)
             await asyncio.sleep(0.005)
+        self.listener.stop()
 
     def request_stop(self):
         self._stop = True
+
+
+def run_blocking(driver: "Driver"):
+    """在目前執行緒跑驅動直到 request_stop()（gui.py 的背景執行緒用）。"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(driver.run())
+    finally:
+        driver.listener.stop()
+        loop.close()
 
 
 def load_config(path: Path) -> dict:

@@ -13,6 +13,12 @@ python3 -m venv .venv
 
 開工前讀 `STATUS.md`（進度）和 `NOTES.md`（協定、按鍵對照、ATVV 0.4/1.0 行為）。這兩份是兩邊共用的事實來源。
 
+## 2026-10-14 更新：gui.py 已改為跨平台
+
+`gui.py` 不再直接 import `playremote` / `rawinput` / `winreg`，改經 `backend.py`（依平台選驅動、可擋的鍵、語音熱鍵選項、開機自啟）。
+Windows 這邊若再改 `gui.py`，平台專屬的東西請放進 `backend.py` 的 Windows 分支，不要直接 import Windows 模組。
+`config_store.example_path()` 在 macOS 會改用 `config.example.mac.toml`。
+
 ## 分工
 
 - **Windows 這邊正在做**：設定介面（PySide6，SayAll 風格的按鍵映射頁）和系統匣。會動到 `playremote.py`、新增 `gui.py`，

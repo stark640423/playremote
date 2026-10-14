@@ -153,6 +153,17 @@ class HidListener:
         self.opened = True
         return True
 
+    def stop(self):
+        """關閉所有介面（解除獨占），之後按鍵恢復由系統處理。"""
+        for dev in list(self._devices):
+            try:
+                iokit.IOHIDDeviceClose(dev, kIOHIDOptionsTypeNone)
+            except Exception:  # noqa: BLE001
+                pass
+        self._devices.clear()
+        self._pressed.clear()
+        self.opened = False
+
     def pump(self, seconds: float = 0.05):
         """在呼叫端的執行緒跑一小段 run loop，處理 HID 回呼。"""
         cf.CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, False)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PlayRemote 設定介面 + 系統匣（Windows）。
+"""PlayRemote 設定介面 + 系統匣（Windows / macOS 共用）。
 
   gui.py [--tray]      --tray: 啟動時只顯示系統匣圖示，不開視窗
 
@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 import warnings
-import winreg
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
@@ -23,11 +22,10 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QMenu, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QScrollArea,
                                QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget)
 
+import backend
 import config_store
-import playremote
-import rawinput
 
-HERE = playremote.HERE
+HERE = backend.HERE
 warnings.filterwarnings("ignore", category=UserWarning, module="pycaw")   # pycaw 列裝置時的 COM 屬性警告，無害
 CONFIG_PATH = HERE / "config.toml"
 APP_NAME = "PlayRemote"
@@ -86,17 +84,17 @@ class DriverWorker(QThread):
 
     def run(self):
         handler = self.log.emit
-        playremote.LOG_HANDLERS.append(handler)
+        backend.LOG_HANDLERS.append(handler)
         try:
-            self.driver = playremote.Driver(self.cfg, on_status=lambda c, b: self.status.emit(c, b),
+            self.driver = backend.Driver(self.cfg, on_status=lambda c, b: self.status.emit(c, b),
                                             on_key=lambda n, g: self.key.emit(n, g))
-            playremote.run_blocking(self.driver)
+            backend.run_blocking(self.driver)
         except Exception as e:  # noqa: BLE001
             self.log.emit(f"驅動停止: {type(e).__name__}: {e}")
             self.crashed.emit(f"{type(e).__name__}: {e}")
         finally:
-            if handler in playremote.LOG_HANDLERS:
-                playremote.LOG_HANDLERS.remove(handler)
+            if handler in backend.LOG_HANDLERS:
+                backend.LOG_HANDLERS.remove(handler)
             self.status.emit(False, None)
 
     def stop(self):
@@ -282,8 +280,8 @@ class KeyCard(QFrame):
         head.addStretch()
         self.block = QCheckBox("擋掉原本按鍵")
         self.block.setChecked(entry["block"])
-        if name in rawinput.KEY_NAME_TO_VK:
-            if name in KEYBOARD_KEYS:
+        if name in backend.BLOCKABLE_KEYS:
+            if name in KEYBOARD_KEYS and backend.FIRST_PRESS_LEAKS:
                 self.block.setToolTip("此鍵的第一下仍會傳給目前視窗（Windows 限制），長按的重複會擋掉")
             self.block.toggled.connect(self._on_block)
             head.addWidget(self.block)
@@ -342,28 +340,33 @@ class VoiceCard(QFrame):
         lay.addWidget(self.mode, 1, 1)
         lay.addWidget(QLabel("熱鍵："), 2, 0)
         hk = QHBoxLayout()
-        self.hotkey = QLineEdit(voice.get("hotkey", "f8"))
-        self.hotkey.setPlaceholderText("f8、win+h、ctrl+win…")
+        self.hotkey = QLineEdit(voice.get("hotkey", backend.HOTKEY_DEFAULT))
+        self.hotkey.setPlaceholderText(backend.HOTKEY_PLACEHOLDER)
         self.style = QComboBox()
-        self.style.addItems(["按住（hold）", "各按一下（tap，切換式）"])
-        self.style.setCurrentIndex(1 if voice.get("hotkey_style") == "tap" else 0)
+        self.style.addItems([label for _k, label in backend.STYLE_OPTIONS])
+        style_keys = [k for k, _l in backend.STYLE_OPTIONS]
+        self.style.setCurrentIndex(style_keys.index(voice.get("hotkey_style")) if voice.get("hotkey_style") in style_keys else 0)
         hk.addWidget(self.hotkey)
         hk.addWidget(self.style)
         lay.addLayout(hk, 2, 1)
         self.vmic = QCheckBox("把遙控器的麥克風當成電腦的預設麥克風（需要 VB-CABLE）")
         self.vmic.setChecked(bool(voice.get("virtual_mic", {}).get("enabled")))
-        lay.addWidget(self.vmic, 3, 0, 1, 2)
-        self.vmic_note = QLabel("")
+        self.vmic_note = QLabel(backend.MIC_NOTE)
         self.vmic_note.setStyleSheet("color: #888; font-size: 11px;")
+        self.vmic_note.setWordWrap(True)
+        if backend.VMIC_SUPPORTED:
+            lay.addWidget(self.vmic, 3, 0, 1, 2)
+        else:
+            self.vmic.setVisible(False)
         lay.addWidget(self.vmic_note, 4, 0, 1, 2)
         lay.addWidget(QLabel("辨識指令："), 5, 0)
         self.stt = QLineEdit(voice.get("stt", {}).get("command", ""))
-        self.stt.setPlaceholderText("內建模式用，{wav} 代表錄音檔，例如 whisper-cli.exe -m model.bin -l zh -nt -np -f {wav}")
+        self.stt.setPlaceholderText(backend.STT_PLACEHOLDER)
         lay.addWidget(self.stt, 5, 1)
         self.save_wav = QCheckBox("保留每段錄音（captures/）")
         self.save_wav.setChecked(bool(voice.get("save_wav")))
         lay.addWidget(self.save_wav, 6, 0, 1, 2)
-        hint = QLabel("SogaType：熱鍵 f8；SogaType 設「按住說話」用 hold，設「切換」用 tap。Windows 內建語音輸入：win+h、tap。")
+        hint = QLabel(backend.VOICE_HINT)
         hint.setStyleSheet("color: #666; font-size: 11px;")
         hint.setWordWrap(True)
         lay.addWidget(hint, 7, 0, 1, 2)
@@ -373,7 +376,8 @@ class VoiceCard(QFrame):
             w.textChanged.connect(lambda _t: self.changed.emit())
         for w in (self.vmic, self.save_wav):
             w.toggled.connect(lambda _b: self.changed.emit())
-        QTimer.singleShot(200, self._check_vmic)
+        if backend.VMIC_SUPPORTED:
+            QTimer.singleShot(200, self._check_vmic)
 
     def _check_vmic(self):
         try:
@@ -387,9 +391,10 @@ class VoiceCard(QFrame):
 
     def apply_to(self, voice: dict):
         voice["mode"] = ["hotkey", "builtin", "none"][self.mode.currentIndex()]
-        voice["hotkey"] = self.hotkey.text().strip() or "f8"
-        voice["hotkey_style"] = "tap" if self.style.currentIndex() == 1 else "hold"
-        voice["virtual_mic"]["enabled"] = self.vmic.isChecked()
+        voice["hotkey"] = self.hotkey.text().strip() or backend.HOTKEY_DEFAULT
+        voice["hotkey_style"] = backend.STYLE_OPTIONS[self.style.currentIndex()][0]
+        if backend.VMIC_SUPPORTED:
+            voice.setdefault("virtual_mic", {})["enabled"] = self.vmic.isChecked()
         voice["stt"]["command"] = self.stt.text().strip()
         voice["save_wav"] = self.save_wav.isChecked()
 
@@ -613,35 +618,14 @@ class MainWindow(QMainWindow):
 
     # ---- 開機自啟 ----
     @staticmethod
-    def _autostart_cmd() -> str:
-        if getattr(sys, "frozen", False):
-            return f'"{sys.executable}" --tray'
-        pyw = Path(sys.executable).with_name("pythonw.exe")
-        return f'"{pyw if pyw.exists() else sys.executable}" "{Path(__file__).resolve()}" --tray'
-
-    @staticmethod
     def autostart_enabled() -> bool:
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as k:
-                winreg.QueryValueEx(k, APP_NAME)
-                return True
-        except OSError:
-            return False
+        return backend.autostart_enabled()
 
     def set_autostart(self, on: bool):
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-                                winreg.KEY_SET_VALUE) as k:
-                if on:
-                    winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, self._autostart_cmd())
-                else:
-                    try:
-                        winreg.DeleteValue(k, APP_NAME)
-                    except FileNotFoundError:
-                        pass
+            backend.set_autostart(on, Path(__file__).resolve())
         except OSError as e:
             QMessageBox.warning(self, APP_NAME, f"設定開機自啟失敗：{e}")
-
 
 def main():
     ap = argparse.ArgumentParser()
