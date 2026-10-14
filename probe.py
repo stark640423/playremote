@@ -151,6 +151,16 @@ async def open_client(name: str, tries: int = 6):
                 pass
             await asyncio.sleep(1)
             continue
+        # Windows 上系統 HID 佔著連線時，WinRT 的服務探索偶爾只回傳一部分；沒看到 ATVV 服務就重連再試
+        uuids = {s.uuid.lower() for s in client.services}
+        if "ab5e0001-5a21-4f05-bc7d-af01f617b664" not in uuids:
+            print(f"  服務列表不完整 ({len(uuids)} 個服務，缺 ATVV)，重新連線...")
+            try:
+                await client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(2)
+            continue
         try:
             yield client
         finally:

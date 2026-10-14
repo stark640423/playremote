@@ -118,7 +118,7 @@ Windows 上用 HID API 讀報告格式：直接 `CreateFile` 開這些 collectio
 | 陀螺儀（空中滑鼠） | 滑鼠 | 相對 dx/dy，約 100 Hz | 系統游標直接動 |
 | 滾輪 | 滑鼠 | `btnFlags=0x0400`，`btnData=±120` 一格 | 標準滾輪 |
 | 麥克風鍵 | 無 HID 事件 | 只走 ATVV | 系統看不到這顆鍵，驅動自己接 |
-| 彩色四鍵、滑鼠圖示鍵 | 無 HID 事件 | 四個 collection 都沒報告 | 推測滑鼠鍵是空中滑鼠開關；彩色鍵可能走自訂 GATT 服務，待驗證 |
+| 彩色四鍵、滑鼠圖示鍵 | 無任何訊號 | HID 四個 collection、ATVV、自訂服務 `1920/2b00`、`0aa0/b002` 全部沒有通知（`probe.py watch` 實測） | 推測走紅外線（給電視）或遙控器本機功能（滑鼠鍵切換空中滑鼠），電腦端無法對應 |
 | 遊戲控制器 collection | — | 從未出現 report ID 196 | 可能是韌體預留 |
 
 其他實測到的行為：
@@ -149,7 +149,7 @@ Windows 上用 HID API 讀報告格式：直接 `CreateFile` 開這些 collectio
 | 00000aa0-3c17-d293-8e48-14fe2e4da212 | b001 | read（2 bytes） | 狀態或版本 |
 | 00000aa0-… | b002 | write, write-no-rsp, notify | 雙向 |
 
-按一般鍵時這兩個服務都沒資料；彩色鍵和滑鼠鍵還沒用 `probe.py watch` 測過。
+按一般鍵、彩色鍵、滑鼠鍵時這兩個服務都沒資料（2026-10-14 實測）。
 
 ## 連線行為
 

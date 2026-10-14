@@ -26,11 +26,11 @@
 | 語音鍵驅動其他語音輸入 App | 完成並實測（SogaType 按住說話模式：`hotkey = "f8"`, `hotkey_style = "hold"`） |
 | 遙控器麥克風 → 電腦麥克風 | 完成並實測（需 VB-CABLE） |
 | 內建離線語音辨識 | 未接。`[voice.stt] command` 可直接填 whisper.cpp 之類的指令，或之後加 Python 內建引擎 |
-| 設定介面 | 未開始。目標是像 SayAll 的按鍵映射頁：遙控器圖、每鍵三格動作、語音鍵選項、連線與電量 |
+| 設定介面（`gui.py`） | **完成**（v0.2.0）：遙控器照片熱點、每鍵單擊/雙擊/長按、語音鍵選項、連線與電量、儲存即套用 |
 | 安裝程式 | **完成**：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
-| 系統匣 | 未開始，目前是命令列視窗 |
+| 系統匣 | **完成**：關閉視窗縮到系統匣，選單可重啟驅動、開機自啟、結束 |
 | macOS 版 | 只有探測工具（`probe.py`、`audio.py`、`stt.py`）。配對卡在系統設定一直轉圈，待解 |
-| 彩色四鍵、滑鼠圖示鍵 | 不走 HID，尚未查出走哪個服務 |
+| 彩色四鍵、滑鼠圖示鍵 | 不送任何訊號給電腦（HID、ATVV、自訂服務都沒有），應為紅外線或本機功能，無法對應 |
 
 ## 已知限制
 
@@ -42,10 +42,8 @@
 
 ## 下一步
 
-1. 設定介面（技術選型：Python + PySide6，或改用 C#/.NET）。
 2. 內建離線語音辨識（whisper.cpp / faster-whisper / Vosk 擇一）。
-3. 系統匣圖示（關掉命令列視窗）、程式碼簽章。
-4. 彩色鍵與滑鼠鍵：用 `probe.py watch` 看自訂服務。
+3. 程式碼簽章。
 5. 驗證 ATVV 的 MIC_CLOSE / MIC_EXTEND / 主機主動 MIC_OPEN，以及 1.0 模式的最長串流秒數。
 6. 產品化：把虛擬音訊驅動與（可能的）鍵盤過濾驅動包進安裝程式，需要驅動簽章；VB-CABLE 轉散佈需授權，
    替代方案是微軟開源的 SysVAD / SimpleAudioSample 自行編譯簽章。

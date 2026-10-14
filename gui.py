@@ -11,6 +11,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import warnings
 import winreg
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import playremote
 import rawinput
 
 HERE = playremote.HERE
+warnings.filterwarnings("ignore", category=UserWarning, module="pycaw")   # pycaw 列裝置時的 COM 屬性警告，無害
 CONFIG_PATH = HERE / "config.toml"
 APP_NAME = "PlayRemote"
 GESTURE_LABEL = {"single": "單擊", "double": "雙擊", "long": "長按"}
@@ -34,8 +36,8 @@ GESTURE_LABEL = {"single": "單擊", "double": "雙擊", "long": "長按"}
 LEFT_KEYS = [("power", "電源鍵", "⏻"), ("up", "上鍵", "︿"), ("down", "下鍵", "﹀"), ("left", "左鍵", "〈"),
              ("right", "右鍵", "〉"), ("ok", "確定鍵", "◎"), ("back", "返回鍵", "↶"), ("home", "主頁鍵", "⌂"),
              ("menu", "選單鍵", "≡"), ("backspace", "退格鍵", "⌫")]
-RIGHT_KEYS = [(str(d), f"數字 {d}", str(d)) for d in (1, 2, 3, 4, 5, 6, 7, 8, 9, 0)] + \
-             [("wheel_up", "滾輪向上", "⇧"), ("wheel_down", "滾輪向下", "⇩")]
+RIGHT_KEYS = [(str(d), f"數字 {d}", str(d)) for d in (1, 2, 3, 4, 5, 6, 7, 8, 9, 0)]
+UNMAPPABLE = {"blue": "藍色鍵", "green": "綠色鍵", "red": "紅色鍵", "yellow": "黃色鍵", "mouse": "滑鼠鍵"}
 KEYBOARD_KEYS = {"up", "down", "left", "right", "backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}
 
 
@@ -517,6 +519,11 @@ class MainWindow(QMainWindow):
     def _on_log(self, line: str):
         self.logview.appendPlainText(line)
         self.statusline.setText(line[10:])
+        try:
+            with (HERE / "playremote.log").open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
     def _on_remote_click(self, name: str):
         card = self.cards.get(name)
@@ -530,6 +537,8 @@ class MainWindow(QMainWindow):
                 sa.ensureWidgetVisible(card)
         elif name == "voice":
             self.voice_card.setFocus()
+        elif name in UNMAPPABLE:
+            self.statusline.setText(f"{UNMAPPABLE[name]}：按下時不會送任何訊號給電腦（可能是紅外線或遙控器本機功能），無法設定")
 
     def _on_key(self, name: str, gesture: str):
         self.remote.flash(name)
