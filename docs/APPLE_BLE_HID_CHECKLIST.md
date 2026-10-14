@@ -4,6 +4,10 @@
 
 ## 觀察到的現象
 
+**2026-10-14 藍牙日誌（已裝 Apple 描述檔）結論**：macOS 認得它是 BLEHID、廣播含 1812；
+系統設定點擊時**完全沒有發出連線或配對請求**，問題卡在設定頁的裝置分類，不是 SMP。
+原因是 Appearance 只在掃描回應、且值為 0x0180。另有一個同位址的非連線型信標（廠商資料 `5D 00 FF "KMSWand"`，Appearance 0）在非配對模式時送出。
+
 - macOS 26 與 iOS 都**只建立 LE 連線、不發起配對**：系統設定列出 PlayRemote，但用通用藍牙圖示、沒有 ⓘ、按鍵無反應。
 - 同一隻遙控器在 Windows 一次配對成功，識別為 GATT compliant HID device。
 - 乾淨環境掃描：廣播含服務 UUID `1812`，廠商資料 `0x005D`（Realtek）`55 66 55 88`，無法從 Mac 端看到是否含 Appearance。
@@ -15,7 +19,7 @@
 
 | 項目 | 要求 | PlayRemote 現況 |
 |---|---|---|
-| ★ **Appearance (AD type 0x19)** | 必須有。遙控器用 `0x0180`（Generic Remote Control）或 `0x03C1`（Keyboard）；若要游標也能用，`0x03C2`（Mouse）或 `0x03C4`（Gamepad）亦可。Apple 以此判斷是否為 HID 並顯示對應圖示 | **疑似缺少**（圖示為通用藍牙） |
+| ★ **Appearance (AD type 0x19)** | 必須放在 **ADV 主封包**（不是掃描回應），且建議用 `0x03C1`（Keyboard）而非 `0x0180`（Generic Remote Control）。新版 macOS 設定頁只用主封包決定裝置類型 | **有，但在掃描回應裡，值 0x0180**。macOS 日誌：主封包到時 `appeareance:0 deviceType:0`，掃描回應到時 `appeareance:384` 但 `deviceType` 不更新 → 歸為通用裝置，不提供連接 |
 | 16-bit Service UUID 列表含 `0x1812` | 必須 | 有 |
 | Flags | LE General Discoverable + BR/EDR Not Supported（`0x06`） | 待確認 |
 | Complete/Shortened Local Name | 建議有 | 有（PlayRemote） |
