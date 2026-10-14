@@ -29,8 +29,8 @@ progress and roadmap in [STATUS.md](STATUS.md). Everything below is in Tradition
 2. 到 [Releases](https://github.com/stark640423/playremote/releases) 下載 `PlayRemote-Setup-<版本>.exe` 執行即可
    （裝到使用者資料夾，不需要系統管理員；也有免安裝的 `PlayRemote-portable-<版本>.zip`）。
    安裝程式沒有簽章，第一次執行若出現 SmartScreen 警告，按「其他資訊 → 仍要執行」。
-3. 開始功能表的「PlayRemote」啟動驅動，「編輯設定 (config.toml)」改按鍵對應；改完重新啟動驅動。
-   安裝時可勾選「開機時自動啟動」。
+3. 開始功能表的「PlayRemote」開啟設定視窗：每個鍵可設單擊／雙擊／長按動作，語音鍵設定在右上，按「儲存並套用」即生效。
+   關閉視窗後程式縮到系統匣繼續跑；安裝時可勾選「開機時自動啟動」（啟動時只顯示系統匣）。
 
 ### 從原始碼執行
 
@@ -53,7 +53,7 @@ copy config.example.toml config.toml
 
 ```powershell
 .venv\Scripts\pip install pyinstaller
-.venv\Scripts\pyinstaller --noconfirm --clean --name PlayRemote --console playremote.py --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-all pycaw --collect-all comtypes --collect-all sounddevice --hidden-import numpy --add-data "config.example.toml;."
+.venv\Scripts\pyinstaller --noconfirm --clean --name PlayRemote --windowed gui.py --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt --collect-all pycaw --collect-all comtypes --collect-all sounddevice --hidden-import numpy --add-data "config.example.toml;."
 iscc installer\playremote.iss      # 需要 Inno Setup 6，產出 dist\PlayRemote-Setup-<版本>.exe
 ```
 
@@ -72,7 +72,9 @@ iscc installer\playremote.iss      # 需要 Inno Setup 6，產出 dist\PlayRemot
 
 | 檔案 | 用途 |
 |---|---|
-| `playremote.py` | Windows 驅動（常駐）：連線、按鍵對應、語音鍵、虛擬麥克風 |
+| `gui.py` | Windows 設定介面 + 系統匣（主程式）：遙控器圖、每鍵三種動作、語音鍵設定、連線與電量 |
+| `playremote.py` | Windows 驅動核心（也可以單獨以命令列執行）：連線、按鍵對應、語音鍵、虛擬麥克風 |
+| `config_store.py` | `config.toml` 讀寫 |
 | `rawinput.py` | Windows Raw Input 監聽 + 低階鍵盤 hook（只處理遙控器的鍵） |
 | `winio.py` | Windows 送組合鍵 / Unicode 打字 / 啟動程式 |
 | `virtualmic.py` | 遙控器音訊 → VB-CABLE → 切換預設麥克風 |

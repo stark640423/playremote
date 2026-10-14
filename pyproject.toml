@@ -11,6 +11,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "bleak>=1.0",
+    'PySide6; sys_platform == "win32"',
     'sounddevice; sys_platform == "win32"',
     'numpy; sys_platform == "win32"',
     'pycaw; sys_platform == "win32"',
@@ -20,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 playremote = "playremote:main"
+playremote-gui = "gui:main"
 
 [tool.setuptools]
-py-modules = ["playremote", "rawinput", "winio", "audio", "virtualmic", "probe", "atvv_probe", "hidwatch", "stt"]
+py-modules = ["gui", "config_store", "playremote", "rawinput", "winio", "audio", "virtualmic", "probe", "atvv_probe", "hidwatch", "stt"]

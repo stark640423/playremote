@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+"""PlayRemote 設定介面 + 系統匣（Windows）。
+
+  gui.py [--tray]      --tray: 啟動時只顯示系統匣圖示，不開視窗
+
+視窗裡：遙控器圖、每個鍵的單擊 / 雙擊 / 長按動作、語音鍵設定、連線狀態與電量。
+驅動 (playremote.Driver) 在背景執行緒跑；按「儲存並套用」會寫回 config.toml 並重新啟動驅動。
+"""
+import argparse
+import asyncio
+import os
+import subprocess
+import sys
+import winreg
+from pathlib import Path
+
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                               QMenu, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QScrollArea,
+                               QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget)
+
+import config_store
+import playremote
+import rawinput
+
+HERE = playremote.HERE
+CONFIG_PATH = HERE / "config.toml"
+APP_NAME = "PlayRemote"
+GESTURE_LABEL = {"single": "單擊", "double": "雙擊", "long": "長按"}
+
+# 左右兩欄的鍵（鍵名、顯示名稱、圖示字）
+LEFT_KEYS = [("power", "電源鍵", "⏻"), ("up", "上鍵", "︿"), ("down", "下鍵", "﹀"), ("left", "左鍵", "〈"),
+             ("right", "右鍵", "〉"), ("ok", "確定鍵", "◎"), ("back", "返回鍵", "↶"), ("home", "主頁鍵", "⌂"),
+             ("menu", "選單鍵", "≡"), ("backspace", "退格鍵", "⌫")]
+RIGHT_KEYS = [(str(d), f"數字 {d}", str(d)) for d in (1, 2, 3, 4, 5, 6, 7, 8, 9, 0)] + \
+             [("wheel_up", "滾輪向上", "⇧"), ("wheel_down", "滾輪向下", "⇩")]
+KEYBOARD_KEYS = {"up", "down", "left", "right", "backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}
+
+
+def action_summary(act) -> str:
+    if not act:
+        return "未設定"
+    if "run" in act:
+        cmd = act["run"].strip().strip('"')
+        return "開啟 " + (Path(cmd.split()[0]).stem if cmd else "?")
+    if "keys" in act:
+        return act["keys"]
+    if "text" in act:
+        return "打字：" + (act["text"][:8] + ("…" if len(act["text"]) > 8 else ""))
+    return "未設定"
+
+
+def make_icon(size: int = 64) -> QIcon:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setBrush(QColor("#f4f4f6"))
+    p.setPen(QPen(QColor("#8a8a8e"), size * 0.05))
+    p.drawRoundedRect(QRectF(size * 0.3, size * 0.05, size * 0.4, size * 0.9), size * 0.2, size * 0.2)
+    p.setBrush(QColor("#2b2b2e"))
+    p.setPen(Qt.NoPen)
+    p.drawEllipse(QRectF(size * 0.36, size * 0.14, size * 0.28, size * 0.28))
+    p.setBrush(QColor("#e53935"))
+    p.drawEllipse(QRectF(size * 0.44, size * 0.6, size * 0.12, size * 0.12))
+    p.end()
+    return QIcon(pm)
+
+
+# ---------------------------------------------------------------- 驅動執行緒
+class DriverWorker(QThread):
+    log = Signal(str)
+    status = Signal(bool, object)
+    key = Signal(str, str)
+
+    def __init__(self, cfg: dict):
+        super().__init__()
+        self.cfg = cfg
+        self.driver = None
+
+    def run(self):
+        handler = self.log.emit
+        playremote.LOG_HANDLERS.append(handler)
+        try:
+            self.driver = playremote.Driver(self.cfg, on_status=lambda c, b: self.status.emit(c, b),
+                                            on_key=lambda n, g: self.key.emit(n, g))
+            asyncio.run(self.driver.run())
+        except Exception as e:  # noqa: BLE001
+            self.log.emit(f"驅動停止: {type(e).__name__}: {e}")
+        finally:
+            if handler in playremote.LOG_HANDLERS:
+                playremote.LOG_HANDLERS.remove(handler)
+            self.status.emit(False, None)
+
+    def stop(self):
+        if self.driver:
+            self.driver.request_stop()
+
+
+# ---------------------------------------------------------------- 遙控器圖
+class RemoteView(QWidget):
+    """用 QPainter 畫的遙控器示意圖；按下的鍵會短暫亮起。"""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(170, 520)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.active: set[str] = set()
+        self._timers: dict[str, QTimer] = {}
+
+    def flash(self, name: str):
+        self.active.add(name)
+        self.update()
+        t = self._timers.get(name)
+        if t is None:
+            t = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(lambda n=name: (self.active.discard(n), self.update()))
+            self._timers[name] = t
+        t.start(350)
+
+    def _btn(self, p, rect: QRectF, name: str, label: str = "", color: str = "#ffffff", fg: str = "#333"):
+        p.setPen(QPen(QColor("#c9c9ce"), 1))
+        p.setBrush(QBrush(QColor("#4f8cff") if name in self.active else QColor(color)))
+        p.drawEllipse(rect)
+        if label:
+            p.setPen(QColor("#ffffff") if name in self.active else QColor(fg))
+            p.drawText(rect, Qt.AlignCenter, label)
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        bw = min(w - 10, 160)
+        x0 = (w - bw) / 2
+        scale = bw / 160
+        body = QRectF(x0, 5, bw, h - 10)
+        p.setPen(QPen(QColor("#b8b8bd"), 1.5))
+        p.setBrush(QColor("#fafafa"))
+        p.drawRoundedRect(body, bw / 2, bw / 2)
+        f = QFont()
+        f.setPointSizeF(9 * scale)
+        p.setFont(f)
+        cx = x0 + bw / 2
+        # 方向盤
+        ring = QRectF(cx - 60 * scale, 25 * scale, 120 * scale, 120 * scale)
+        p.setPen(QPen(QColor("#c9c9ce"), 1))
+        p.setBrush(QColor("#f0f0f2"))
+        p.drawEllipse(ring)
+        for name, (dx, dy) in {"up": (0, -42), "down": (0, 42), "left": (-42, 0), "right": (42, 0)}.items():
+            r = QRectF(cx + dx * scale - 14 * scale, ring.center().y() + dy * scale - 14 * scale, 28 * scale, 28 * scale)
+            self._btn(p, r, name, {"up": "︿", "down": "﹀", "left": "〈", "right": "〉"}[name], "#f0f0f2")
+        self._btn(p, QRectF(cx - 22 * scale, ring.center().y() - 22 * scale, 44 * scale, 44 * scale), "ok", "OK")
+        # 返回 / Home / 電源
+        y = 165 * scale
+        for i, (name, label, fg) in enumerate([("back", "↶", "#333"), ("home", "⌂", "#333"), ("power", "⏻", "#e53935")]):
+            self._btn(p, QRectF(cx + (i - 1) * 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), name, label, fg=fg)
+        # 數字
+        grid = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["menu", "0", "backspace"]]
+        for r_, row in enumerate(grid):
+            for c_, name in enumerate(row):
+                label = {"menu": "≡", "backspace": "⌫"}.get(name, name)
+                rect = QRectF(cx + (c_ - 1) * 46 * scale - 16 * scale, (215 + r_ * 40) * scale, 32 * scale, 32 * scale)
+                self._btn(p, rect, name, label)
+        # 滑鼠 / LED / 麥克風
+        y = 385 * scale
+        self._btn(p, QRectF(cx - 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), "mouse", "🖱")
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#e53935"))
+        p.drawRoundedRect(QRectF(cx - 12 * scale, y + 13 * scale, 24 * scale, 8 * scale), 4, 4)
+        self._btn(p, QRectF(cx + 46 * scale - 17 * scale, y, 34 * scale, 34 * scale), "voice", "🎤")
+        # 彩色鍵
+        y = 450 * scale
+        for name, (dx, dy, col) in {"blue": (0, -22, "#2f3cc9"), "green": (-34, 8, "#2e9e4f"),
+                                     "red": (34, 8, "#e53935"), "yellow": (0, 38, "#f2c01f")}.items():
+            self._btn(p, QRectF(cx + dx * scale - 13 * scale, y + dy * scale, 26 * scale, 26 * scale), name, "", col)
+        p.end()
+
+
+# ---------------------------------------------------------------- 動作編輯
+class ActionDialog(QDialog):
+    def __init__(self, parent, title: str, act):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(460)
+        lay = QVBoxLayout(self)
+        self.group = QButtonGroup(self)
+        self.r_none = QRadioButton("未設定（不做任何事）")
+        self.r_run = QRadioButton("開啟程式或執行指令")
+        self.r_keys = QRadioButton("送出按鍵組合（例如 ctrl+shift+v、enter、win+d）")
+        self.r_text = QRadioButton("打字")
+        for i, r in enumerate((self.r_none, self.r_run, self.r_keys, self.r_text)):
+            self.group.addButton(r, i)
+        self.e_run = QLineEdit()
+        self.e_run.setPlaceholderText('例如 notepad、"C:\\Program Files\\...\\app.exe"、code .')
+        b_browse = QPushButton("瀏覽…")
+        b_browse.clicked.connect(self._browse)
+        self.e_keys = QLineEdit()
+        self.e_keys.setPlaceholderText("ctrl+shift+v")
+        self.e_text = QLineEdit()
+        self.e_text.setPlaceholderText("要打進目前視窗的文字")
+        lay.addWidget(self.r_none)
+        lay.addWidget(self.r_run)
+        row = QHBoxLayout()
+        row.addWidget(self.e_run)
+        row.addWidget(b_browse)
+        lay.addLayout(row)
+        lay.addWidget(self.r_keys)
+        lay.addWidget(self.e_keys)
+        lay.addWidget(self.r_text)
+        lay.addWidget(self.e_text)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        if not act:
+            self.r_none.setChecked(True)
+        elif "run" in act:
+            self.r_run.setChecked(True)
+            self.e_run.setText(act["run"])
+        elif "keys" in act:
+            self.r_keys.setChecked(True)
+            self.e_keys.setText(act["keys"])
+        elif "text" in act:
+            self.r_text.setChecked(True)
+            self.e_text.setText(act["text"])
+
+    def _browse(self):
+        fn, _ = QFileDialog.getOpenFileName(self, "選擇程式", "", "程式 (*.exe *.bat *.cmd *.lnk);;所有檔案 (*)")
+        if fn:
+            self.e_run.setText(f'"{fn}"' if " " in fn else fn)
+            self.r_run.setChecked(True)
+
+    def result_action(self):
+        i = self.group.checkedId()
+        if i == 1 and self.e_run.text().strip():
+            return {"run": self.e_run.text().strip()}
+        if i == 2 and self.e_keys.text().strip():
+            return {"keys": self.e_keys.text().strip()}
+        if i == 3 and self.e_text.text():
+            return {"text": self.e_text.text()}
+        return None
+
+
+# ---------------------------------------------------------------- 按鍵卡片
+class KeyCard(QFrame):
+    changed = Signal()
+
+    def __init__(self, name: str, title: str, icon: str, entry: dict):
+        super().__init__()
+        self.name = name
+        self.entry = entry
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("KeyCard { background: #f5f5f7; border: 1px solid #e1e1e6; border-radius: 10px; }")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 8, 10, 8)
+        head = QHBoxLayout()
+        self.title = QLabel(f"{icon}  {title}")
+        self.title.setStyleSheet("font-weight: 600; font-size: 13px;")
+        head.addWidget(self.title)
+        head.addStretch()
+        self.block = QCheckBox("擋掉原本按鍵")
+        self.block.setChecked(entry["block"])
+        if name in rawinput.KEY_NAME_TO_VK:
+            if name in KEYBOARD_KEYS:
+                self.block.setToolTip("此鍵的第一下仍會傳給目前視窗（Windows 限制），長按的重複會擋掉")
+            self.block.toggled.connect(self._on_block)
+            head.addWidget(self.block)
+        lay.addLayout(head)
+        row = QHBoxLayout()
+        self.buttons = {}
+        for g in ("single", "double", "long"):
+            b = QPushButton()
+            b.setMinimumHeight(44)
+            b.setStyleSheet("QPushButton { background: #e8e8ec; border: none; border-radius: 8px; padding: 4px; }"
+                            "QPushButton:hover { background: #d8d8e0; }")
+            b.clicked.connect(lambda _c=False, gg=g: self._edit(gg))
+            self.buttons[g] = b
+            row.addWidget(b)
+        lay.addLayout(row)
+        self._refresh()
+
+    def _refresh(self):
+        for g, b in self.buttons.items():
+            b.setText(f"{GESTURE_LABEL[g]}\n{action_summary(self.entry.get(g))}")
+
+    def _edit(self, g: str):
+        dlg = ActionDialog(self, f"{self.title.text().strip()} — {GESTURE_LABEL[g]}", self.entry.get(g))
+        if dlg.exec() == QDialog.Accepted:
+            self.entry[g] = dlg.result_action()
+            self._refresh()
+            self.changed.emit()
+
+    def _on_block(self, on: bool):
+        self.entry["block"] = on
+        self.changed.emit()
+
+    def highlight(self, on: bool):
+        self.setStyleSheet("KeyCard { background: %s; border: 1px solid %s; border-radius: 10px; }"
+                           % (("#e3edff", "#4f8cff") if on else ("#f5f5f7", "#e1e1e6")))
+
+
+# ---------------------------------------------------------------- 語音卡片
+class VoiceCard(QFrame):
+    changed = Signal()
+
+    def __init__(self, voice: dict):
+        super().__init__()
+        self.voice = voice
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setStyleSheet("VoiceCard { background: #f5f5f7; border: 1px solid #e1e1e6; border-radius: 10px; }")
+        lay = QGridLayout(self)
+        lay.setContentsMargins(10, 8, 10, 8)
+        t = QLabel("🎤  語音鍵")
+        t.setStyleSheet("font-weight: 600; font-size: 13px;")
+        lay.addWidget(t, 0, 0, 1, 2)
+        lay.addWidget(QLabel("按住說話時："), 1, 0)
+        self.mode = QComboBox()
+        self.mode.addItems(["轉給其他語音輸入 App（按住它的熱鍵）", "內建：放開後跑辨識指令並打字", "只存錄音檔"])
+        self.mode.setCurrentIndex({"hotkey": 0, "builtin": 1, "none": 2}.get(voice.get("mode"), 0))
+        lay.addWidget(self.mode, 1, 1)
+        lay.addWidget(QLabel("熱鍵："), 2, 0)
+        hk = QHBoxLayout()
+        self.hotkey = QLineEdit(voice.get("hotkey", "f8"))
+        self.hotkey.setPlaceholderText("f8、win+h、ctrl+win…")
+        self.style = QComboBox()
+        self.style.addItems(["按住（hold）", "各按一下（tap，切換式）"])
+        self.style.setCurrentIndex(1 if voice.get("hotkey_style") == "tap" else 0)
+        hk.addWidget(self.hotkey)
+        hk.addWidget(self.style)
+        lay.addLayout(hk, 2, 1)
+        self.vmic = QCheckBox("把遙控器的麥克風當成電腦的預設麥克風（需要 VB-CABLE）")
+        self.vmic.setChecked(bool(voice.get("virtual_mic", {}).get("enabled")))
+        lay.addWidget(self.vmic, 3, 0, 1, 2)
+        self.vmic_note = QLabel("")
+        self.vmic_note.setStyleSheet("color: #888; font-size: 11px;")
+        lay.addWidget(self.vmic_note, 4, 0, 1, 2)
+        lay.addWidget(QLabel("辨識指令："), 5, 0)
+        self.stt = QLineEdit(voice.get("stt", {}).get("command", ""))
+        self.stt.setPlaceholderText("內建模式用，{wav} 代表錄音檔，例如 whisper-cli.exe -m model.bin -l zh -nt -np -f {wav}")
+        lay.addWidget(self.stt, 5, 1)
+        self.save_wav = QCheckBox("保留每段錄音（captures/）")
+        self.save_wav.setChecked(bool(voice.get("save_wav")))
+        lay.addWidget(self.save_wav, 6, 0, 1, 2)
+        hint = QLabel("SogaType：熱鍵 f8；SogaType 設「按住說話」用 hold，設「切換」用 tap。Windows 內建語音輸入：win+h、tap。")
+        hint.setStyleSheet("color: #666; font-size: 11px;")
+        hint.setWordWrap(True)
+        lay.addWidget(hint, 7, 0, 1, 2)
+        for w in (self.mode, self.style):
+            w.currentIndexChanged.connect(lambda _i: self.changed.emit())
+        for w in (self.hotkey, self.stt):
+            w.textChanged.connect(lambda _t: self.changed.emit())
+        for w in (self.vmic, self.save_wav):
+            w.toggled.connect(lambda _b: self.changed.emit())
+        QTimer.singleShot(200, self._check_vmic)
+
+    def _check_vmic(self):
+        try:
+            import virtualmic
+            vm = virtualmic.VirtualMic(self.voice.get("virtual_mic", {}).get("playback", "CABLE Input"),
+                                       self.voice.get("virtual_mic", {}).get("capture", "CABLE Output"), log=lambda m: None)
+            self.vmic_note.setText("已找到 VB-CABLE，可以使用" if vm.available else
+                                   "找不到 VB-CABLE：請到 vb-audio.com/Cable 安裝後重開電腦")
+        except Exception as e:  # noqa: BLE001
+            self.vmic_note.setText(f"虛擬麥克風不可用：{e}")
+
+    def apply_to(self, voice: dict):
+        voice["mode"] = ["hotkey", "builtin", "none"][self.mode.currentIndex()]
+        voice["hotkey"] = self.hotkey.text().strip() or "f8"
+        voice["hotkey_style"] = "tap" if self.style.currentIndex() == 1 else "hold"
+        voice["virtual_mic"]["enabled"] = self.vmic.isChecked()
+        voice["stt"]["command"] = self.stt.text().strip()
+        voice["save_wav"] = self.save_wav.isChecked()
+
+
+# ---------------------------------------------------------------- 主視窗
+class MainWindow(QMainWindow):
+    def __init__(self, start_hidden: bool = False):
+        super().__init__()
+        self.setWindowTitle(f"{APP_NAME} 設定")
+        self.setWindowIcon(make_icon())
+        self.resize(1080, 760)
+        self.cfg = config_store.load(CONFIG_PATH, HERE)
+        self.dirty = False
+        self.worker: DriverWorker | None = None
+        self.cards: dict[str, KeyCard] = {}
+        self._build()
+        self._build_tray()
+        self.start_driver()
+        if not start_hidden:
+            self.show()
+
+    # ---- UI ----
+    def _build(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QVBoxLayout(root)
+        # 標題列
+        top = QHBoxLayout()
+        title = QLabel("按鍵映射")
+        title.setStyleSheet("font-size: 22px; font-weight: 700;")
+        top.addWidget(title)
+        self.enabled = QCheckBox("啟用自定義按鍵功能")
+        self.enabled.setChecked(bool(self.cfg["input"].get("enabled", True)))
+        self.enabled.toggled.connect(lambda _b: self._mark_dirty())
+        top.addWidget(self.enabled)
+        top.addStretch()
+        self.device = QLabel()
+        self.device.setStyleSheet("QLabel { background: #eef3ff; border: 1px solid #c7d6ff; border-radius: 10px; padding: 8px 14px; }")
+        top.addWidget(self.device)
+        outer.addLayout(top)
+        self._set_status(False, None)
+        # 三欄
+        cols = QHBoxLayout()
+        left = QVBoxLayout()
+        for name, t, ic in LEFT_KEYS:
+            left.addWidget(self._card(name, t, ic))
+        left.addStretch()
+        cols.addWidget(self._scroll(left), 4)
+        self.remote = RemoteView()
+        mid = QVBoxLayout()
+        mid.addWidget(self.remote, 0, Qt.AlignHCenter)
+        cols.addLayout(mid, 2)
+        right = QVBoxLayout()
+        self.voice_card = VoiceCard(self.cfg["voice"])
+        self.voice_card.changed.connect(self._mark_dirty)
+        right.addWidget(self.voice_card)
+        for name, t, ic in RIGHT_KEYS:
+            right.addWidget(self._card(name, t, ic))
+        right.addStretch()
+        cols.addWidget(self._scroll(right), 4)
+        outer.addLayout(cols, 1)
+        # 底部
+        bottom = QHBoxLayout()
+        self.statusline = QLabel("")
+        self.statusline.setStyleSheet("color: #555;")
+        bottom.addWidget(self.statusline, 1)
+        b_log = QPushButton("記錄")
+        b_log.setCheckable(True)
+        b_log.toggled.connect(lambda on: self.logview.setVisible(on))
+        bottom.addWidget(b_log)
+        b_open = QPushButton("開啟設定檔")
+        b_open.clicked.connect(lambda: os.startfile(CONFIG_PATH))
+        bottom.addWidget(b_open)
+        self.b_save = QPushButton("儲存並套用")
+        self.b_save.setStyleSheet("QPushButton { background: #2f6fed; color: white; padding: 6px 18px; border-radius: 6px; font-weight: 600; }")
+        self.b_save.clicked.connect(self.save_and_apply)
+        bottom.addWidget(self.b_save)
+        outer.addLayout(bottom)
+        self.logview = QPlainTextEdit()
+        self.logview.setReadOnly(True)
+        self.logview.setMaximumBlockCount(500)
+        self.logview.setFixedHeight(160)
+        self.logview.setVisible(False)
+        outer.addWidget(self.logview)
+
+    def _scroll(self, layout: QVBoxLayout) -> QScrollArea:
+        w = QWidget()
+        w.setLayout(layout)
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.NoFrame)
+        sa.setWidget(w)
+        return sa
+
+    def _card(self, name: str, title: str, icon: str) -> KeyCard:
+        entry = self.cfg["keys"].setdefault(name, {"block": False, "single": None, "double": None, "long": None})
+        card = KeyCard(name, title, icon, entry)
+        card.changed.connect(self._mark_dirty)
+        self.cards[name] = card
+        return card
+
+    def _mark_dirty(self):
+        self.dirty = True
+        self.b_save.setText("儲存並套用 ●")
+
+    def _set_status(self, connected: bool, battery):
+        dot = "🟢" if connected else "⚪"
+        text = f"<b>{self.cfg['remote'].get('name', 'PlayRemote')}</b><br>{dot} {'已連線' if connected else '未連線'}"
+        if battery is not None:
+            text += f"　🔋 {battery}%"
+        self.device.setText(text)
+        if self.tray if hasattr(self, "tray") else False:
+            self.tray.setToolTip(f"{APP_NAME}：{'已連線' if connected else '未連線'}" + (f"，電量 {battery}%" if battery is not None else ""))
+
+    # ---- 驅動 ----
+    def start_driver(self):
+        self.stop_driver()
+        self.worker = DriverWorker(self.cfg)
+        self.worker.log.connect(self._on_log)
+        self.worker.status.connect(self._set_status)
+        self.worker.key.connect(self._on_key)
+        self.worker.start()
+        self.statusline.setText("驅動啟動中…")
+
+    def stop_driver(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(30000)
+        self.worker = None
+
+    def _on_log(self, line: str):
+        self.logview.appendPlainText(line)
+        self.statusline.setText(line[10:])
+
+    def _on_key(self, name: str, gesture: str):
+        self.remote.flash(name)
+        card = self.cards.get(name)
+        if card:
+            card.highlight(True)
+            QTimer.singleShot(400, lambda: card.highlight(False))
+
+    def save_and_apply(self):
+        self.cfg["input"]["enabled"] = self.enabled.isChecked()
+        self.voice_card.apply_to(self.cfg["voice"])
+        try:
+            config_store.save(CONFIG_PATH, self.cfg)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, APP_NAME, f"寫入設定失敗：{e}")
+            return
+        self.dirty = False
+        self.b_save.setText("儲存並套用")
+        self.statusline.setText("已儲存，重新啟動驅動…")
+        self.cfg = config_store.load(CONFIG_PATH, HERE)
+        self.start_driver()
+
+    # ---- 系統匣 ----
+    def _build_tray(self):
+        self.tray = QSystemTrayIcon(make_icon(), self)
+        menu = QMenu()
+        a_open = QAction("開啟設定", self)
+        a_open.triggered.connect(self.show_window)
+        a_restart = QAction("重新啟動驅動", self)
+        a_restart.triggered.connect(self.start_driver)
+        self.a_autostart = QAction("開機時自動啟動", self)
+        self.a_autostart.setCheckable(True)
+        self.a_autostart.setChecked(self.autostart_enabled())
+        self.a_autostart.toggled.connect(self.set_autostart)
+        a_quit = QAction("結束", self)
+        a_quit.triggered.connect(self.quit)
+        for a in (a_open, a_restart, self.a_autostart):
+            menu.addAction(a)
+        menu.addSeparator()
+        menu.addAction(a_quit)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(lambda r: self.show_window() if r == QSystemTrayIcon.Trigger else None)
+        self.tray.setToolTip(APP_NAME)
+        self.tray.show()
+
+    def show_window(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def closeEvent(self, ev):
+        if self.tray.isVisible():
+            ev.ignore()
+            self.hide()
+            self.tray.showMessage(APP_NAME, "仍在背景執行，從系統匣圖示可以再打開或結束。", make_icon(), 3000)
+        else:
+            self.quit()
+
+    def quit(self):
+        self.tray.hide()
+        self.stop_driver()
+        QApplication.quit()
+
+    # ---- 開機自啟 ----
+    @staticmethod
+    def _autostart_cmd() -> str:
+        if getattr(sys, "frozen", False):
+            return f'"{sys.executable}" --tray'
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        return f'"{pyw if pyw.exists() else sys.executable}" "{Path(__file__).resolve()}" --tray'
+
+    @staticmethod
+    def autostart_enabled() -> bool:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as k:
+                winreg.QueryValueEx(k, APP_NAME)
+                return True
+        except OSError:
+            return False
+
+    def set_autostart(self, on: bool):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
+                                winreg.KEY_SET_VALUE) as k:
+                if on:
+                    winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, self._autostart_cmd())
+                else:
+                    try:
+                        winreg.DeleteValue(k, APP_NAME)
+                    except FileNotFoundError:
+                        pass
+        except OSError as e:
+            QMessageBox.warning(self, APP_NAME, f"設定開機自啟失敗：{e}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tray", action="store_true", help="啟動時只顯示系統匣圖示")
+    args = ap.parse_args()
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName(APP_NAME)
+    f = app.font()
+    f.setPointSize(10)
+    app.setFont(f)
+    win = MainWindow(start_hidden=args.tray)
+    rc = app.exec()
+    win.stop_driver()
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()

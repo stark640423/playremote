@@ -42,6 +42,7 @@ append = ""               # 打完文字後再送的鍵，例如 "enter"
 # block = true 時擋掉原本的鍵 (數字鍵不會打出數字、ok 不會變 Enter)；沒設定的鍵照常當一般鍵盤。
 # on = "down" (預設, 按下時觸發) 或 "up" (放開時觸發)
 [input]
+enabled = true          # false = 全部按鍵照常當一般鍵盤，不做任何對應 (設定介面的總開關)
 double_click_ms = 600   # 雙擊: 兩次按下的間隔上限
 long_press_ms = 500     # 長按: 按住超過這麼久
 

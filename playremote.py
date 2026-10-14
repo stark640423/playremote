@@ -48,8 +48,17 @@ GESTURE_NAME = {"single": "單擊", "double": "雙擊", "long": "長按"}
 ACTION_KEYS = ("run", "keys", "text")
 
 
+LOG_HANDLERS = []          # GUI 可以註冊 callable(str) 接收訊息
+
+
 def log(msg: str):
-    print(f"{datetime.now():%H:%M:%S}  {msg}", flush=True)
+    line = f"{datetime.now():%H:%M:%S}  {msg}"
+    print(line, flush=True)
+    for h in list(LOG_HANDLERS):
+        try:
+            h(line)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def normalize_keys(raw: dict) -> dict:
@@ -76,11 +85,15 @@ def normalize_keys(raw: dict) -> dict:
 
 
 class Driver:
-    def __init__(self, cfg: dict, verbose: bool = False):
+    def __init__(self, cfg: dict, verbose: bool = False, on_status=None, on_key=None):
         self.cfg = cfg
         self.verbose = verbose
-        self.keys = normalize_keys(cfg.get("keys", {}))
+        self.on_status = on_status      # callable(connected: bool, battery: int | None)
+        self.on_key = on_key            # callable(name: str, gesture: str)
+        self._stop = False
+        self._tasks: list = []
         inp = cfg.get("input", {})
+        self.keys = normalize_keys(cfg.get("keys", {})) if inp.get("enabled", True) else {}
         self.double_ms = float(inp.get("double_click_ms", 300))
         self.long_ms = float(inp.get("long_press_ms", 500))
         self.voice: dict = cfg.get("voice", {})
@@ -159,6 +172,13 @@ class Driver:
         else:
             self._gesture_up(ev.name, entry)
 
+    def _notify_status(self):
+        if self.on_status:
+            try:
+                self.on_status(self.connected, self.battery)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _g(self, name: str) -> dict:
         return self.gstate.setdefault(name, {"pending_single": None, "long_timer": None,
                                              "long_fired": False, "ignore_up": False})
@@ -211,6 +231,11 @@ class Driver:
     def fire(self, name: str, entry: dict, gesture: str):
         action = entry.get(gesture)
         label = GESTURE_NAME[gesture]
+        if self.on_key:
+            try:
+                self.on_key(name, gesture)
+            except Exception:  # noqa: BLE001
+                pass
         if not action:
             log(f"  {name} {label}: 未設定動作" + ("，已擋掉" if entry["block"] else ""))
             return
@@ -307,15 +332,16 @@ class Driver:
 
     # ---------------- 連線 ----------------
     def _on_battery(self, _s, data: bytearray):
-        if data:
+        if data and data[0] != self.battery:
             self.battery = data[0]
             log(f"電量 {self.battery}%")
+            self._notify_status()
 
     async def ble_loop(self):
         rc = self.cfg.get("remote", {})
         name = rc.get("name", "PlayRemote")
         retry = float(rc.get("reconnect_seconds", 5))
-        while True:
+        while not self._stop:
             addr = rc.get("address") or ""
             if not addr:
                 try:
@@ -334,6 +360,7 @@ class Driver:
                 log(f"連線 {addr} ...")
                 await client.connect()
                 self.connected = True
+                self._notify_status()
                 log("已連線，送 GET_CAPS 1.0 (語音鍵: 按住說話)")
                 mic = AtvvMic(client, on_utterance=self.on_utterance, on_press=self.on_voice_press,
                               on_release=self.on_voice_release, log=lambda m: log(f"  mic: {m}"),
@@ -347,23 +374,26 @@ class Driver:
                 if not self.listener.devices:
                     self.listener.list_devices()
                     log(f"Raw Input: 現在找到 {len(self.listener.devices)} 個 PlayRemote HID 裝置")
-                while client.is_connected:
+                while client.is_connected and not self._stop:
                     await asyncio.sleep(0.1)
                     await mic.tick()
-                log("遙控器斷線")
+                log("遙控器斷線" if not self._stop else "停止驅動，斷開連線")
             except Exception as e:  # noqa: BLE001
                 log(f"連線失敗: {type(e).__name__}: {str(e)[:120]}")
             finally:
                 self.connected = False
+                self.battery = None
+                self._notify_status()
                 try:
                     if client.is_connected:
                         await client.disconnect()
                 except Exception:  # noqa: BLE001
                     pass
-            await asyncio.sleep(retry)
+            if not self._stop:
+                await asyncio.sleep(retry)
 
     async def pump_loop(self):
-        while True:
+        while not self._stop:
             rawinput.pump()
             self.blocker.flush()
             await asyncio.sleep(0.005)
@@ -371,7 +401,17 @@ class Driver:
     async def run(self):
         self.loop = asyncio.get_running_loop()
         self.start_input()
-        await asyncio.gather(self.pump_loop(), self.ble_loop())
+        try:
+            await asyncio.gather(self.pump_loop(), self.ble_loop())
+        finally:
+            self.blocker.stop()
+            if self.vmic:
+                self.vmic.stop()
+                self.vmic.restore_default()
+
+    def request_stop(self):
+        """從別的執行緒呼叫：讓 run() 收尾結束 (GUI 重新載入設定時用)。"""
+        self._stop = True
 
 
 def load_config(path: Path) -> dict:
