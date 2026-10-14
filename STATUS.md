@@ -32,6 +32,20 @@
 | macOS 版 | 只有探測工具（`probe.py`、`audio.py`、`stt.py`）。配對卡在系統設定一直轉圈，待解 |
 | 彩色四鍵、滑鼠圖示鍵 | 不送任何訊號給電腦（HID、ATVV、自訂服務都沒有），應為紅外線或本機功能，無法對應 |
 
+## 2026-10-14 重大發現：USB 2.4G 接收器模式
+
+遙控器附的 USB 接收器插上 Mac 後，枚舉成一個 USB 複合裝置 `PlayRemote`（VID 0x0610 / PID 0x1000）：
+
+- **USB 音訊**：麥克風，16 kHz 單聲道，系統直接看到「PlayRemote」輸入裝置。
+- **HID**：滑鼠（page 1/usage 2，陀螺儀與滾輪）、遊戲控制器（1/5）、Consumer Control（12/1）、vendor 頁（0xFF00/1）。
+  沒有標準鍵盤介面，按鍵不會直接打字。
+
+意義：在 macOS 上**完全繞過藍牙配對問題**，也不需要 BlackHole 虛擬麥克風。
+Mac 版可以改成「USB 接收器優先」：用 IOHIDManager 攔 HID 報告做熱鍵，語音輸入法直接選 PlayRemote 麥克風。
+Windows 版也可評估同樣走 USB（鍵盤攔截問題可能一併消失）。
+
+工具：`hidwatch_mac.py`（監看 USB HID 報告）、`usb_mic_test.py`（測 USB 麥克風是否只在按住語音鍵時送聲音）。
+
 ## 已知限制
 
 - **數字鍵、方向鍵、退格的第一下會漏進目前視窗**。這是 Windows 使用者層 API 的極限（鍵盤 hook 當下分不出來源），
