@@ -42,10 +42,18 @@ class VirtualMic:
     def start(self, src_rate: Optional[int] = None):
         if src_rate:
             self.src_rate = src_rate
-        # 緩衝要夠大才吃得下藍牙音訊的抖動（太小會掉幀、收不全）。用預設（偏保守但穩）。
-        self.stream = self.sd.OutputStream(device=self.idx, samplerate=self.target_rate,
-                                           channels=self.channels, dtype="float32")
-        self.stream.start()
+        # 優先用「來源取樣率」開（BlackHole 支援 16k），就完全不用重取樣，音質最好。
+        # 開不成才退回裝置預設取樣率 + 重取樣。緩衝用預設（偏保守但穩，吃得下藍牙抖動）。
+        for rate, ch in [(self.src_rate, 1), (self.src_rate, 2), (self.target_rate, self.channels)]:
+            try:
+                self.stream = self.sd.OutputStream(device=self.idx, samplerate=rate,
+                                                   channels=ch, dtype="float32")
+                self.stream.start()
+                self.target_rate, self.channels = rate, ch
+                return
+            except Exception:  # noqa: BLE001
+                self.stream = None
+                continue
 
     def feed(self, pcm_bytes: bytes):
         """寫入一段 16-bit mono PCM（src_rate）；需要時重取樣到裝置取樣率並擴成多聲道。"""
