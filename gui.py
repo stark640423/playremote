@@ -349,15 +349,14 @@ class VoiceCard(QFrame):
         hk.addWidget(self.hotkey)
         hk.addWidget(self.style)
         lay.addLayout(hk, 2, 1)
-        self.vmic = QCheckBox("把遙控器的麥克風當成電腦的預設麥克風（需要 VB-CABLE）")
-        self.vmic.setChecked(bool(voice.get("virtual_mic", {}).get("enabled")))
+        mic_key, mic_label = backend.MIC_OPTION
+        self.vmic = QCheckBox(mic_label)
+        self.vmic.setChecked(bool(voice.get("virtual_mic", {}).get("enabled")) if mic_key == "virtual_mic.enabled"
+                             else bool(voice.get(mic_key, True)))
         self.vmic_note = QLabel(backend.MIC_NOTE)
         self.vmic_note.setStyleSheet("color: #888; font-size: 11px;")
         self.vmic_note.setWordWrap(True)
-        if backend.VMIC_SUPPORTED:
-            lay.addWidget(self.vmic, 3, 0, 1, 2)
-        else:
-            self.vmic.setVisible(False)
+        lay.addWidget(self.vmic, 3, 0, 1, 2)
         lay.addWidget(self.vmic_note, 4, 0, 1, 2)
         lay.addWidget(QLabel("辨識指令："), 5, 0)
         self.stt = QLineEdit(voice.get("stt", {}).get("command", ""))
@@ -393,8 +392,11 @@ class VoiceCard(QFrame):
         voice["mode"] = ["hotkey", "builtin", "none"][self.mode.currentIndex()]
         voice["hotkey"] = self.hotkey.text().strip() or backend.HOTKEY_DEFAULT
         voice["hotkey_style"] = backend.STYLE_OPTIONS[self.style.currentIndex()][0]
-        if backend.VMIC_SUPPORTED:
+        mic_key = backend.MIC_OPTION[0]
+        if mic_key == "virtual_mic.enabled":
             voice.setdefault("virtual_mic", {})["enabled"] = self.vmic.isChecked()
+        else:
+            voice[mic_key] = self.vmic.isChecked()
         voice["stt"]["command"] = self.stt.text().strip()
         voice["save_wav"] = self.save_wav.isChecked()
 

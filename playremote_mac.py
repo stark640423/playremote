@@ -30,6 +30,7 @@ try:
 except ModuleNotFoundError:  # Python < 3.11
     import tomli as tomllib
 
+import coreaudio_mac
 import hid_mac
 import macio
 from gestures import GESTURE_NAME, GestureDetector, normalize_keys
@@ -105,6 +106,11 @@ class Driver:
         self.voice_down = False
         self.recorder: Optional[Recorder] = None
         self._stop = False
+        self.mic_switch: Optional[coreaudio_mac.MicSwitcher] = None
+        if self.voice.get("auto_mic", True) and self.voice.get("mode", "hotkey") == "hotkey":
+            sw = coreaudio_mac.MicSwitcher(self.voice.get("mic", "PlayRemote"))
+            self.mic_switch = sw
+            log("語音鍵按下時會把系統預設麥克風切成「PlayRemote」" + ("" if sw.available else "（目前找不到，插上接收器後生效）"))
 
         # 哪些介面要獨占：該介面裡有任一鍵 block=true，或語音鍵在該介面 (避免 search 鍵被系統當成 Spotlight)
         seize = set()
@@ -200,6 +206,14 @@ class Driver:
         mode = self.voice.get("mode", "hotkey")
         log(f"語音鍵按下 ({mode})")
         if mode == "hotkey":
+            if self.mic_switch:
+                try:
+                    if self.mic_switch.switch():
+                        time.sleep(0.08)           # 讓 App 收到熱鍵時已經是新的預設麥克風
+                    else:
+                        log("  找不到 PlayRemote 麥克風，維持原本的麥克風")
+                except Exception as e:  # noqa: BLE001
+                    log(f"  切換麥克風失敗: {e}")
             combo = self.voice.get("hotkey", "fn")
             style = self.voice.get("hotkey_style", "hold")
             try:
@@ -231,9 +245,17 @@ class Driver:
             elif style == "tap":
                 macio.send_keys(self.voice.get("hotkey", "fn"))
             self.voice_combo = None
+        if mode == "hotkey" and self.mic_switch and self.loop:
+            self.loop.call_later(0.8, self._restore_mic)   # 等 App 停止錄音再切回
         elif mode == "builtin" and self.recorder:
             pcm, rate = self.recorder.stop()
             self.on_utterance(pcm, rate)
+
+    def _restore_mic(self):
+        try:
+            self.mic_switch.restore()
+        except Exception as e:  # noqa: BLE001
+            log(f"  切回麥克風失敗: {e}")
 
     def on_utterance(self, pcm: bytes, rate: int):
         secs = len(pcm) / 2 / rate

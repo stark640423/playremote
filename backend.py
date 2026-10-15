@@ -14,6 +14,7 @@ if IS_WIN:
     BLOCKABLE_KEYS = set(rawinput.KEY_NAME_TO_VK)
     FIRST_PRESS_LEAKS = True        # 鍵盤鍵的第一下會漏進目前視窗（Windows 使用者層限制）
     VMIC_SUPPORTED = True
+    MIC_OPTION = ("virtual_mic.enabled", "把遙控器的麥克風當成電腦的預設麥克風（需要 VB-CABLE）")
     HOTKEY_DEFAULT = "f8"
     HOTKEY_PLACEHOLDER = "f8、win+h、ctrl+win…"
     STYLE_OPTIONS = [("hold", "按住（hold）"), ("tap", "各按一下（tap，切換式）")]
@@ -27,13 +28,14 @@ else:
     BLOCKABLE_KEYS = set(hid_mac.KEY_NAMES_BY_KEYBOARD.values()) | set(hid_mac.KEY_NAMES_BY_CONSUMER.values())
     FIRST_PRESS_LEAKS = False
     VMIC_SUPPORTED = False
+    MIC_OPTION = ("auto_mic", "按住語音鍵時自動把系統麥克風切成「PlayRemote」，放開後切回原本的")
     HOTKEY_DEFAULT = "fn"
     HOTKEY_PLACEHOLDER = "fn、rcmd、f18、ctrl…"
     STYLE_OPTIONS = [("hold", "按住（hold）"), ("tap", "各按一下（tap，切換式）"), ("double", "連按兩下（macOS 聽寫）")]
     VOICE_HINT = ("SogaType / 豆包：熱鍵 fn、hold。Typeless：fn、tap。macOS 內建聽寫：ctrl、連按兩下。"
                   "麥克風：請在語音輸入 App（或系統設定 → 聲音 → 輸入）選「PlayRemote」。")
     STT_PLACEHOLDER = "留空 = macOS 內建離線辨識；或填外部指令，{wav} 代表錄音檔"
-    MIC_NOTE = "遙控器的麥克風會以「PlayRemote」出現在系統的輸入裝置裡（USB 接收器）。"
+    MIC_NOTE = "遙控器的麥克風會以「PlayRemote」出現在系統的輸入裝置裡（USB 接收器）；關掉上面的選項就要自己在語音輸入 App 裡選它。"
     TRANSPORT_NOTE = "USB 接收器"
 
 Driver = drv.Driver

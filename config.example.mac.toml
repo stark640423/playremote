@@ -19,7 +19,8 @@ mode = "hotkey"
 hotkey = "fn"
 hotkey_style = "hold"     # hold: 按下時 key down、放開時 key up；tap: 按下和放開各按一下；double: 按下時連按兩下
 usb_key = "search"        # 接收器模式下哪個鍵當語音鍵 (實測語音鍵送的是 Consumer 0x221 = search)
-mic = "PlayRemote"        # builtin 模式錄音用的輸入裝置名稱 (片段即可)
+mic = "PlayRemote"        # 遙控器麥克風在系統裡的名稱 (片段即可)
+auto_mic = true           # hotkey 模式：按住語音鍵時自動把系統預設麥克風切成上面的裝置，放開後切回
 save_wav = false
 min_seconds = 0.3
 
