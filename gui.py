@@ -695,6 +695,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, f"設定開機自啟失敗：{e}")
 
 def main():
+    # 子程序模式：被驅動呼叫來跑離線辨識（自己的 main thread + run loop，Speech 回呼才收得到）。
+    # 必須在建 QApplication 之前處理，純 CLI、不開視窗。
+    if len(sys.argv) >= 3 and sys.argv[1] == "--stt":
+        import stt
+        try:
+            print(stt.transcribe_file(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "zh-TW"))
+            sys.exit(0)
+        except Exception as e:  # noqa: BLE001
+            print(f"stt error: {e}", file=sys.stderr)
+            sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--tray", action="store_true", help="啟動時只顯示系統匣圖示")
     args = ap.parse_args()

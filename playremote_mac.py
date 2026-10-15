@@ -60,9 +60,17 @@ def acquire_single_instance():
     return f
 
 
+LOG_FILE = DATA_DIR / "driver.log"
+
+
 def log(msg: str):
     line = f"{datetime.now():%H:%M:%S}  {msg}"
     print(line, flush=True)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:   # 寫檔方便除錯（打包版看不到 stdout）
+            f.write(line + "\n")
+    except Exception:  # noqa: BLE001
+        pass
     for h in list(LOG_HANDLERS):
         try:
             h(line)
@@ -390,17 +398,22 @@ class Driver:
                 wv.setframerate(rate)
                 wv.writeframes(pcm)
             log(f"錄音 {secs:.1f}s → {out.name}，辨識中…")
+            import subprocess
             cmd = self.stt.get("command", "")
+            lang = self.stt.get("lang", "zh-TW")
             if cmd:
-                import subprocess
                 r = subprocess.run(cmd.replace("{wav}", str(out)), shell=True,
-                                   capture_output=True, text=True)
-                text = r.stdout.strip() if r.returncode == 0 else ""
-                if r.returncode != 0:
-                    log(f"辨識指令失敗 (code {r.returncode}): {r.stderr[:200]}")
+                                   capture_output=True, text=True, timeout=60)
+            elif getattr(sys, "frozen", False):
+                # 打包版：用 app 自己的 --stt 子程序跑辨識（子程序有自己的 run loop，Speech 回呼才收得到）
+                r = subprocess.run([sys.executable, "--stt", str(out), lang],
+                                   capture_output=True, text=True, timeout=60)
             else:
-                import stt
-                text = stt.transcribe_file(str(out), self.stt.get("lang", "zh-TW"))
+                r = subprocess.run([sys.executable, str(HERE / "stt.py"), str(out), "--lang", lang],
+                                   capture_output=True, text=True, timeout=60)
+            text = r.stdout.strip() if r.returncode == 0 else ""
+            if r.returncode != 0:
+                log(f"辨識失敗 (code {r.returncode}): {(r.stderr or '').strip()[:200]}")
             log(f"辨識結果: {text!r}")
             if text and self.stt.get("type_result", True):
                 macio.type_text(text)
