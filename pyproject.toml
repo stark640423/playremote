@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "playremote"
-version = "0.2.1"
-description = "Open-source driver for the PlayRemote BLE voice remote: custom hotkeys per key and hold-to-talk voice input (Windows now, macOS planned)."
+version = "0.3.0"
+description = "Open-source driver for the PlayRemote voice remote: custom hotkeys per key and hold-to-talk voice input (Windows via Bluetooth, macOS via the USB receiver)."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "bleak>=1.0",
-    'PySide6; sys_platform == "win32"',
-    'sounddevice; sys_platform == "win32"',
-    'numpy; sys_platform == "win32"',
+    "PySide6",
+    "sounddevice",
+    "numpy",
+    'tomli; python_version < "3.11"',
     'pycaw; sys_platform == "win32"',
     'pyobjc-framework-Speech; sys_platform == "darwin"',
     'pyobjc-framework-Quartz; sys_platform == "darwin"',
@@ -24,4 +25,4 @@ playremote = "playremote:main"
 playremote-gui = "gui:main"
 
 [tool.setuptools]
-py-modules = ["gui", "config_store", "playremote", "rawinput", "winio", "audio", "virtualmic", "probe", "atvv_probe", "hidwatch", "stt"]
+py-modules = ["gui", "backend", "config_store", "gestures", "playremote", "rawinput", "winio", "audio", "virtualmic", "probe", "atvv_probe", "hidwatch", "stt", "playremote_mac", "hid_mac", "macio", "coreaudio_mac", "hidwatch_mac", "usb_mic_test", "pair_spi_mac"]

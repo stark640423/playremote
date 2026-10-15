@@ -92,3 +92,17 @@ iscc installer\playremote.iss      # 需要 Inno Setup 6，產出 dist\PlayRemot
 ## 授權
 
 MIT，見 [LICENSE](LICENSE)。VB-CABLE 是 VB-Audio 的軟體，請自行安裝。
+
+## macOS 安裝（USB 接收器模式）
+
+從 [Releases](https://github.com/stark640423/playremote/releases) 下載 `PlayRemote-<版本>-macOS.dmg`：
+
+1. 把 PlayRemote 拖到 Applications。
+2. 第一次開啟：Finder 對 PlayRemote 按右鍵 → 打開 → 打開（App 未經 Apple 簽署，只需做一次；若仍被擋，到「系統設定 → 隱私權與安全性」最下方按「仍要打開」）。
+3. 允許「輸入監控」（讀遙控器按鍵）與「輔助使用」（送出熱鍵）；沒跳提示就到「系統設定 → 隱私權與安全性」手動加入 PlayRemote，然後重開 App。
+4. 插上遙控器附的 USB 接收器，視窗右上角顯示「已連線」。
+5. 語音鍵：按住說話。預設會自動把系統麥克風切成 PlayRemote 並按住 Fn，搭配 SogaType 等「Fn 按住說話」的語音輸入法。
+
+macOS 目前不支援藍牙模式：遙控器的廣播內容讓新版 macOS 不把它當成可配對的 HID 裝置，需要改韌體，詳見 `docs/APPLE_BLE_HID_CHECKLIST.md`。
+
+設定檔與記錄：`~/Library/Application Support/PlayRemote/`。自己打包：`installer/build_mac.sh`。

@@ -36,6 +36,9 @@ import macio
 from gestures import GESTURE_NAME, GestureDetector, normalize_keys
 
 HERE = Path(__file__).resolve().parent
+# 打包成 .app 後，設定 / 記錄 / 錄音放到使用者的 Application Support，不要寫進 app 內部
+DATA_DIR = (Path.home() / "Library" / "Application Support" / "PlayRemote") if getattr(sys, "frozen", False) else HERE
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_HANDLERS: list = []
 
 
@@ -98,7 +101,7 @@ class Driver:
         self.voice: dict = cfg.get("voice", {})
         self.stt: dict = self.voice.get("stt", {})
         self.voice_key = self.voice.get("usb_key", "search")
-        self.captures = HERE / "captures"
+        self.captures = DATA_DIR / "captures"
         self.captures.mkdir(exist_ok=True)
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.gd: Optional[GestureDetector] = None
@@ -337,7 +340,7 @@ def run_blocking(driver: "Driver"):
 
 def load_config(path: Path) -> dict:
     if not path.exists():
-        example = HERE / "config.example.mac.toml"
+        example = Path(getattr(sys, "_MEIPASS", HERE)) / "config.example.mac.toml"
         shutil.copy(example, path)
         log(f"沒有 {path.name}，已從 {example.name} 建立，請依需求修改。")
     with open(path, "rb") as f:
@@ -346,7 +349,7 @@ def load_config(path: Path) -> dict:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("--config", default=str(HERE / "config.toml"))
+    p.add_argument("--config", default=str(DATA_DIR / "config.toml"))
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args()
     if sys.platform != "darwin":

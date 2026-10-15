@@ -42,6 +42,7 @@ Driver = drv.Driver
 run_blocking = drv.run_blocking
 LOG_HANDLERS = drv.LOG_HANDLERS
 HERE: Path = drv.HERE
+DATA_DIR: Path = getattr(drv, "DATA_DIR", drv.HERE)   # 設定檔 / 記錄檔放哪 (Windows: 程式旁；macOS .app: Application Support)
 
 
 # ---------------- 開機自啟 ----------------

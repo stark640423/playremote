@@ -27,7 +27,7 @@
 | 遙控器麥克風 → 電腦麥克風 | 完成並實測（需 VB-CABLE） |
 | 內建離線語音辨識 | 未接。`[voice.stt] command` 可直接填 whisper.cpp 之類的指令，或之後加 Python 內建引擎 |
 | 設定介面（`gui.py`） | **完成**（v0.2.0）：遙控器照片熱點、每鍵單擊/雙擊/長按、語音鍵選項、連線與電量、儲存即套用 |
-| 安裝程式 | **完成**：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
+| 安裝程式 | **Windows 與 macOS 皆完成**。macOS：`installer/build_mac.sh`（PyInstaller .app + DMG，ad-hoc 簽名，Info.plist 權限說明），GitHub Actions `macos` job 隨 `v*` 標籤發行。Windows：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
 | 系統匣 | **完成**：關閉視窗縮到系統匣，選單可重啟驅動、開機自啟、結束 |
 | macOS 版驅動（`playremote_mac.py`，USB 接收器） | **原型完成**：IOHIDManager 攔鍵（block 介面獨占、未設定鍵補送）、單擊/雙擊/長按、run/keys/text 動作（CGEvent）、語音鍵 hotkey（Fn 給 SogaType）/ builtin（USB 麥克風錄音 + macOS 內建辨識）。離線測試通過，待使用者實機驗收 |
 | macOS 藍牙 | 探測工具齊全。**藍牙：已確認為韌體問題**（Appearance 在掃描回應且為 0x0180，設定頁不分類為 HID；第三方 App 無法發起配對，見 `docs/APPLE_BLE_HID_CHECKLIST.md`）。**USB 接收器：按鍵/陀螺儀/滾輪/麥克風實測可用**，Mac 版以此為主 |

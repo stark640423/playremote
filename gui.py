@@ -27,7 +27,7 @@ import config_store
 
 HERE = backend.HERE
 warnings.filterwarnings("ignore", category=UserWarning, module="pycaw")   # pycaw 列裝置時的 COM 屬性警告，無害
-CONFIG_PATH = HERE / "config.toml"
+CONFIG_PATH = backend.DATA_DIR / "config.toml"
 APP_NAME = "PlayRemote"
 GESTURE_LABEL = {"single": "單擊", "double": "雙擊", "long": "長按"}
 
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
         self.logview.appendPlainText(line)
         self.statusline.setText(line[10:])
         try:
-            with (HERE / "playremote.log").open("a", encoding="utf-8") as f:
+            with (backend.DATA_DIR / "playremote.log").open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
         except OSError:
             pass
