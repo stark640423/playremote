@@ -58,6 +58,15 @@ iokit.IOHIDDeviceRegisterInputReportCallback.argtypes = [ctypes.c_void_p, ctypes
                                                          ctypes.c_void_p, ctypes.c_void_p]
 iokit.IOHIDDeviceGetProperty.restype = ctypes.c_void_p
 iokit.IOHIDDeviceGetProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+iokit.IOHIDManagerClose.restype = ctypes.c_int
+iokit.IOHIDManagerClose.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+iokit.IOHIDManagerCopyDevices.restype = ctypes.c_void_p
+iokit.IOHIDManagerCopyDevices.argtypes = [ctypes.c_void_p]
+iokit.IOHIDManagerRegisterInputReportCallback.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8),
+                                                          ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p]
+cf.CFSetGetCount.restype = ctypes.c_long
+cf.CFSetGetCount.argtypes = [ctypes.c_void_p]
+cf.CFSetGetValues.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
 iokit.IOHIDCheckAccess.restype = ctypes.c_int
 iokit.IOHIDCheckAccess.argtypes = [ctypes.c_int]
@@ -158,6 +167,7 @@ class HidListener:
                  on_raw: Optional[Callable[[str, bytes], None]] = None, transport: str = "usb"):
         self.on_event = on_event
         self.transport = transport                 # "usb" (接收器) | "ble" (系統配對)
+        self._ble_seized = False
         # USB：滑鼠介面獨立，永不獨占；藍牙：全部擠在一個介面，要擋鍵就得連滑鼠一起獨占並補送位移
         self.seize = set(seize_ifaces) if transport == "ble" else set(seize_ifaces) - {"mouse"}
         self.vid, self.pid = vid, pid
@@ -173,6 +183,8 @@ class HidListener:
 
     @property
     def devices(self) -> list[dict]:
+        if self.transport == "ble" and self._mgr:
+            self._refresh_ble_devices()               # 遙控器睡眠/喚醒時狀態才會即時更新
         return list(self._devices.values())
 
     def start(self) -> bool:
@@ -190,17 +202,56 @@ class HidListener:
         iokit.IOHIDManagerRegisterDeviceMatchingCallback(self._mgr, add_cb, None)
         iokit.IOHIDManagerRegisterDeviceRemovalCallback(self._mgr, rm_cb, None)
         iokit.IOHIDManagerScheduleWithRunLoop(self._mgr, cf.CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
-        # 不用 manager 開裝置，改成每個介面各自開 (才能決定哪些要獨占)
+        if self.transport == "ble":
+            # 藍牙是系統擁有的裝置，matching callback 不一定會觸發；直接用 manager 層級開啟＋收報告。
+            # 只有一個介面，要擋鍵就整支獨占 (seize)，否則一般開啟讓系統也收得到。
+            self._ble_seized = bool(self.seize)
+            opt = kIOHIDOptionsTypeSeizeDevice if self._ble_seized else kIOHIDOptionsTypeNone
+            ret = iokit.IOHIDManagerOpen(self._mgr, opt)
+            if ret != 0 and self._ble_seized:
+                code = ret & 0xffffffff
+                self.log(f"藍牙獨占開啟失敗 (0x{code:x})，改用一般模式（擋鍵可能失效，系統仍會收到按鍵）")
+                self.problems.add("exclusive")
+                self._ble_seized = False
+                ret = iokit.IOHIDManagerOpen(self._mgr, kIOHIDOptionsTypeNone)
+            if ret != 0:
+                code = ret & 0xffffffff
+                if code == ERR_NOT_PERMITTED:
+                    self.problems.add("permission")
+                self.log(f"開啟藍牙 HID 失敗 (0x{code:x})")
+                self.opened = False
+                return False
+            buf = (ctypes.c_uint8 * 64)()
+            self._bufs.append(buf)
+            iokit.IOHIDManagerRegisterInputReportCallback(self._mgr, buf, 64, report_cb, None)
+            self._refresh_ble_devices()
+        # USB：不用 manager 開裝置，改成每個介面各自開 (才能決定哪些要獨占)
         self.opened = True
         return True
 
+    def _refresh_ble_devices(self):
+        """列舉目前符合的藍牙裝置，填進 _devices（供狀態列顯示介面數）。"""
+        dset = iokit.IOHIDManagerCopyDevices(self._mgr)
+        n = cf.CFSetGetCount(dset) if dset else 0
+        arr = (ctypes.c_void_p * n)()
+        if n:
+            cf.CFSetGetValues(dset, arr)
+        self._devices = {int(d): {"iface": "ble", "seized": self._ble_seized} for d in arr if d}
+
     def stop(self):
         """關閉所有介面（解除獨占），之後按鍵恢復由系統處理。"""
-        for dev in list(self._devices):
-            try:
-                iokit.IOHIDDeviceClose(dev, kIOHIDOptionsTypeNone)
-            except Exception:  # noqa: BLE001
-                pass
+        if self.transport == "ble":
+            if self._mgr:
+                try:
+                    iokit.IOHIDManagerClose(self._mgr, kIOHIDOptionsTypeNone)
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            for dev in list(self._devices):
+                try:
+                    iokit.IOHIDDeviceClose(dev, kIOHIDOptionsTypeNone)
+                except Exception:  # noqa: BLE001
+                    pass
         self._devices.clear()
         self._pressed.clear()
         self.opened = False
@@ -211,14 +262,11 @@ class HidListener:
 
     # ---- 回呼 ----
     def _on_add(self, ctx, result, sender, device):
-        page, usage = _dev_int(device, "PrimaryUsagePage"), _dev_int(device, "PrimaryUsage")
         if self.transport == "ble":
-            # 藍牙只有一個介面，所有報告都走它；只要任一邏輯介面要擋鍵，就得獨占整支
-            iface = "ble"
-            seize = bool(self.seize)
-        else:
-            iface = IFACE_NAMES.get((page, usage), f"page{page:x}/usage{usage:x}")
-            seize = iface in self.seize
+            return                                       # 藍牙在 start() 用 manager 層級開啟，不走這裡
+        page, usage = _dev_int(device, "PrimaryUsagePage"), _dev_int(device, "PrimaryUsage")
+        iface = IFACE_NAMES.get((page, usage), f"page{page:x}/usage{usage:x}")
+        seize = iface in self.seize
         ret = iokit.IOHIDDeviceOpen(device, kIOHIDOptionsTypeSeizeDevice if seize else kIOHIDOptionsTypeNone)
         if ret != 0:
             code = ret & 0xffffffff
@@ -249,14 +297,15 @@ class HidListener:
             self.log(f"HID 介面 {info['iface']} 已移除（接收器拔掉？）")
 
     def _on_report(self, ctx, result, sender, rtype, report_id, data, length):
+        if self.transport == "ble":
+            # manager 層級的回呼，sender 可能對不上列舉的指標，直接用整支的獨占狀態
+            self._on_ble_report(report_id, bytes(data[:length]), length, self._ble_seized)
+            return
         info = self._devices.get(sender)
         if not info:
             return
         raw = bytes(data[:length])
         iface, seized = info["iface"], info["seized"]
-        if iface == "ble":
-            self._on_ble_report(report_id, raw, length, seized)
-            return
         if iface == "keyboard" and report_id != 0xC5:
             return                                      # 0xC4 閒置心跳等
         if self.on_raw:
