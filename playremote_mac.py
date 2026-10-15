@@ -361,20 +361,46 @@ class Driver:
             return "unknown"
 
     async def _atvv_loop(self):
-        """訂閱 ATVV：遙控器按住麥克風鍵 → 收串流 → 解碼 → 離線辨識 → 打進目前視窗。斷線自動重連。"""
+        """訂閱 ATVV 語音。兩種模式：
+        - builtin：收完一段 → 離線辨識 → 打進視窗。
+        - hotkey ：把聲音即時灌進虛擬麥克風（BlackHole）並送熱鍵給 SogaType 等語音輸入 App。斷線自動重連。
+        """
         import audio
         import probe
+        mode = self.voice.get("mode", "hotkey")
+        self._vmic = None
+        if mode == "hotkey":
+            try:
+                import virtualmic_mac
+                dev = self.voice.get("vmic_device", "BlackHole")
+                self._vmic = virtualmic_mac.VirtualMic(dev if isinstance(dev, str) else "BlackHole")
+                if self._vmic.available:
+                    log(f"藍牙語音(hotkey)：聲音會灌進虛擬麥克風「{self._vmic.name}」，並送熱鍵 "
+                        f"{self.voice.get('hotkey', 'fn')} 給語音輸入 App")
+                    self._vmic_switch = coreaudio_mac.MicSwitcher(self._vmic.name)
+                    self._vmic.start(src_rate=16000)     # 串流開著，避免每次按下才開造成開頭被切掉
+                else:
+                    log("藍牙語音(hotkey)：找不到虛擬麥克風（請先安裝 BlackHole 並在設定填裝置名稱），"
+                        "這段語音會改用內建辨識打字。")
+                    self._vmic = None
+            except Exception as e:  # noqa: BLE001
+                log(f"藍牙語音(hotkey) 初始化失敗，改用內建辨識：{e}")
+                self._vmic = None
+
+        on_utt = None if self._vmic else self._atvv_transcribe_sync
+        on_pcm = self._atvv_feed if self._vmic else None
         name = self.cfg.get("remote", {}).get("name", "PlayRemote")
         log("藍牙語音：背景連線 ATVV 中（遙控器要醒著並保持在系統藍牙連線）")
         while not self._stop:
             try:
                 async with probe.open_client(name) as client:
                     mic = audio.AtvvMic(
-                        client, on_utterance=self._atvv_transcribe_sync,
+                        client, on_utterance=on_utt, on_pcm=on_pcm,
                         on_press=self._atvv_press, on_release=self._atvv_release,
                         log=lambda m: log(f"  atvv: {m}"))
                     await mic.start(negotiate_v10=True)
-                    log("藍牙語音已就緒：按住遙控器麥克風鍵說話，放開後會離線辨識並打字。")
+                    log("藍牙語音已就緒：按住遙控器麥克風鍵說話。" +
+                        ("放開後離線辨識並打字。" if not self._vmic else "說話時會餵給語音輸入 App。"))
                     while client.is_connected and not self._stop:
                         await asyncio.sleep(0.1)
                         await mic.tick()
@@ -383,6 +409,16 @@ class Driver:
             if self._stop:
                 break
             await asyncio.sleep(3)          # 遙控器睡眠/斷線後，等一下再重連
+        if getattr(self, "_vmic", None):
+            self._vmic.stop()
+
+    def _atvv_feed(self, chunk: bytes, rate: int):
+        """hotkey 模式：每收到一幀解好的 PCM，即時灌進虛擬麥克風。"""
+        if self._vmic:
+            try:
+                self._vmic.feed(chunk)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _atvv_transcribe_sync(self, pcm: bytes, rate: int):
         """在 ATVV 執行緒內同步處理一段語音：存檔→辨識→打字（不碰 HID 的 event loop）。"""
@@ -431,9 +467,44 @@ class Driver:
                 self.on_key(self.voice_key, "press")     # GUI 亮燈
             except Exception:  # noqa: BLE001
                 pass
+        if getattr(self, "_vmic", None):                 # hotkey 模式：切麥 + 送熱鍵（串流已開著）
+            try:
+                sw = getattr(self, "_vmic_switch", None)
+                if sw:
+                    sw.switch()                          # 系統預設麥克風 → 虛擬裝置，讓 App 收得到
+                combo = self.voice.get("hotkey", "fn")
+                style = self.voice.get("hotkey_style", "hold")
+                self._voice_combo = macio.parse_combo(combo)
+                if style == "hold":
+                    macio.key_down(self._voice_combo)
+                else:
+                    macio.send_keys(combo)
+                    self._voice_combo = None
+            except Exception as e:  # noqa: BLE001
+                log(f"  語音 hotkey 啟動失敗：{e}")
 
     def _atvv_release(self):
         log("語音鍵放開（藍牙 ATVV）")
+        if getattr(self, "_vmic", None):
+            try:
+                style = self.voice.get("hotkey_style", "hold")
+                if style == "hold" and getattr(self, "_voice_combo", None):
+                    macio.key_up(self._voice_combo)
+                elif style == "tap":
+                    macio.send_keys(self.voice.get("hotkey", "fn"))
+                self._voice_combo = None
+            except Exception as e:  # noqa: BLE001
+                log(f"  語音 hotkey 放開失敗：{e}")
+            import threading
+            threading.Timer(0.6, self._atvv_release_cleanup).start()   # 等 App 收完音再關
+
+    def _atvv_release_cleanup(self):
+        try:
+            sw = getattr(self, "_vmic_switch", None)       # 串流保持開著，只把麥克風切回去
+            if sw:
+                sw.restore()
+        except Exception as e:  # noqa: BLE001
+            log(f"  語音收尾失敗：{e}")
 
     async def transcribe(self, wav: Path):
         t0 = time.monotonic()

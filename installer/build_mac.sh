@@ -14,6 +14,7 @@ rm -rf build dist
   --collect-all bleak --collect-all sounddevice --collect-all numpy \
   --hidden-import AppKit --hidden-import Speech --hidden-import Quartz --hidden-import tomli \
   --hidden-import playremote_mac --hidden-import hid_mac --hidden-import macio --hidden-import coreaudio_mac \
+  --hidden-import virtualmic_mac \
   --hidden-import gestures --hidden-import stt --hidden-import probe --hidden-import audio \
   --add-data "config.example.mac.toml:." --add-data "config.example.toml:." --add-data "assets:assets"
 

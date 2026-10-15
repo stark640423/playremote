@@ -24,6 +24,9 @@ hotkey_style = "hold"     # hold: 按下時 key down、放開時 key up；tap: �
 usb_key = "search"        # 接收器模式下哪個鍵當語音鍵 (實測語音鍵送的是 Consumer 0x221 = search)
 mic = "PlayRemote"        # 遙控器麥克風在系統裡的名稱 (片段即可)
 auto_mic = true           # hotkey 模式：按住語音鍵時自動把系統預設麥克風切成上面的裝置，放開後切回
+# 藍牙 hotkey 模式專用：把 ATVV 的聲音灌進這個虛擬麥克風，SogaType 等 App 從它收音 (需先裝 BlackHole)。
+# 設成 "builtin" 以外的模式且填好這個，藍牙語音就會餵給 App；找不到裝置會自動退回內建辨識打字。
+vmic_device = "BlackHole"
 save_wav = false
 min_seconds = 0.3
 
