@@ -322,12 +322,38 @@ class Driver:
             self.loop.create_task(self.transcribe(out))
 
     # ---------------- 藍牙語音 (ATVV over GATT) ----------------
-    async def _run_atvv(self):
-        """藍牙模式的語音：訂閱 ATVV，遙控器按住麥克風鍵時收串流 → 解碼 → 離線辨識 → 打進目前視窗。
+    def _atvv_thread_main(self):
+        """獨立執行緒入口：用自己的 event loop 跑 bleak（與 HID 的 run loop 隔離）。
 
-        與 USB 不同：語音鍵不送 HID，是遙控器自己在 ATVV 送 AUDIO_START/STOP（Android TV 模式）；
-        藍牙沒有系統麥克風可切，所以一律走內建辨識（不做 hotkey / 虛擬麥克風）。
+        注意：沒有 NSBluetoothAlwaysUsageDescription 的裸 Python 一碰藍牙會被 macOS 直接 SIGABRT，
+        所以先檢查藍牙授權狀態，未授權就不碰 CoreBluetooth（打包成 .app 有這個 key，不受影響）。
         """
+        auth = self._bluetooth_authorization()
+        if auth == "denied":
+            log("藍牙語音：沒有藍牙權限，語音功能停用（到系統設定→隱私權→藍牙 開啟 PlayRemote 再重開）")
+            return
+        # notDetermined 時，CoreBluetooth 會想跳權限視窗，需要 Info.plist 的 NSBluetoothAlwaysUsageDescription，
+        # 否則整個程序會被 macOS 直接 SIGABRT。打包成 .app 有這個 key；從原始碼裸跑且尚未授權時先略過，避免整個 app 崩掉。
+        if auth == "unknown" and not getattr(sys, "frozen", False):
+            log("藍牙語音：藍牙權限未定且非打包版，先略過語音（請用打包好的 PlayRemote.app，或先在系統設定授權藍牙）")
+            return
+        try:
+            asyncio.run(self._atvv_loop())
+        except Exception as e:  # noqa: BLE001
+            log(f"藍牙語音執行緒結束：{type(e).__name__}: {e}")
+
+    @staticmethod
+    def _bluetooth_authorization() -> str:
+        """回傳 'ok' / 'denied' / 'unknown'（notDetermined 當 unknown，讓 .app 去跳權限視窗）。"""
+        try:
+            from CoreBluetooth import CBCentralManager
+            v = int(CBCentralManager.authorization())
+            return {0: "unknown", 1: "denied", 2: "denied", 3: "ok"}.get(v, "unknown")
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    async def _atvv_loop(self):
+        """訂閱 ATVV：遙控器按住麥克風鍵 → 收串流 → 解碼 → 離線辨識 → 打進目前視窗。斷線自動重連。"""
         import audio
         import probe
         name = self.cfg.get("remote", {}).get("name", "PlayRemote")
@@ -336,7 +362,7 @@ class Driver:
             try:
                 async with probe.open_client(name) as client:
                     mic = audio.AtvvMic(
-                        client, on_utterance=self._atvv_utterance,
+                        client, on_utterance=self._atvv_transcribe_sync,
                         on_press=self._atvv_press, on_release=self._atvv_release,
                         log=lambda m: log(f"  atvv: {m}"))
                     await mic.start(negotiate_v10=True)
@@ -344,13 +370,46 @@ class Driver:
                     while client.is_connected and not self._stop:
                         await asyncio.sleep(0.1)
                         await mic.tick()
-            except asyncio.CancelledError:
-                break
             except Exception as e:  # noqa: BLE001
                 log(f"藍牙語音連線中斷：{type(e).__name__}: {e}")
             if self._stop:
                 break
             await asyncio.sleep(3)          # 遙控器睡眠/斷線後，等一下再重連
+
+    def _atvv_transcribe_sync(self, pcm: bytes, rate: int):
+        """在 ATVV 執行緒內同步處理一段語音：存檔→辨識→打字（不碰 HID 的 event loop）。"""
+        try:
+            secs = len(pcm) / 2 / rate
+            if secs < float(self.voice.get("min_seconds", 0.3)):
+                log(f"語音太短 ({secs:.1f}s)，忽略")
+                return
+            out = self.captures / f"voice-{datetime.now():%Y%m%d-%H%M%S}.wav"
+            with wave.open(str(out), "wb") as wv:
+                wv.setnchannels(1)
+                wv.setsampwidth(2)
+                wv.setframerate(rate)
+                wv.writeframes(pcm)
+            log(f"錄音 {secs:.1f}s → {out.name}，辨識中…")
+            cmd = self.stt.get("command", "")
+            if cmd:
+                import subprocess
+                r = subprocess.run(cmd.replace("{wav}", str(out)), shell=True,
+                                   capture_output=True, text=True)
+                text = r.stdout.strip() if r.returncode == 0 else ""
+                if r.returncode != 0:
+                    log(f"辨識指令失敗 (code {r.returncode}): {r.stderr[:200]}")
+            else:
+                import stt
+                text = stt.transcribe_file(str(out), self.stt.get("lang", "zh-TW"))
+            log(f"辨識結果: {text!r}")
+            if text and self.stt.get("type_result", True):
+                macio.type_text(text)
+                if self.stt.get("append"):
+                    macio.send_keys(self.stt["append"])
+            if not self.voice.get("save_wav", False):
+                out.unlink(missing_ok=True)
+        except Exception as e:  # noqa: BLE001
+            log(f"藍牙語音處理失敗：{type(e).__name__}: {e}")
 
     def _atvv_press(self):
         log("語音鍵按下（藍牙 ATVV）")
@@ -362,13 +421,6 @@ class Driver:
 
     def _atvv_release(self):
         log("語音鍵放開（藍牙 ATVV）")
-
-    def _atvv_utterance(self, pcm: bytes, rate: int):
-        # ATVV 的回呼在事件迴圈執行緒；直接走既有的存檔 + 辨識 + 打字流程
-        try:
-            self.on_utterance(pcm, rate)
-        except Exception as e:  # noqa: BLE001
-            log(f"藍牙語音處理失敗：{e}")
 
     async def transcribe(self, wav: Path):
         t0 = time.monotonic()
@@ -423,10 +475,13 @@ class Driver:
         inp = self.cfg.get("input", {})
         self.gd = GestureDetector(self.loop, self.fire, inp.get("double_click_ms", 600), inp.get("long_press_ms", 500))
         self.start_input()
-        # 藍牙模式：語音鍵不送 HID，語音改走 ATVV GATT。開一條背景連線訂閱，遙控器按住麥克風鍵時收串流→解碼→辨識→打字。
-        self._atvv_task = None
+        # 藍牙模式：語音鍵不送 HID，語音改走 ATVV GATT。放在獨立執行緒跑 bleak（自己的 event loop），
+        # 與 HID 的 run loop 完全隔離——這樣就算藍牙連線出問題，也絕不會影響按鍵。
+        self._atvv_thread = None
         if self.transport == "ble" and self.voice.get("mode", "hotkey") != "none":
-            self._atvv_task = self.loop.create_task(self._run_atvv())
+            import threading
+            self._atvv_thread = threading.Thread(target=self._atvv_thread_main, name="atvv", daemon=True)
+            self._atvv_thread.start()
         last_n = -1
         while not self._stop:
             self.listener.pump(0.02)          # HID 回呼在這裡發生
@@ -445,16 +500,15 @@ class Driver:
                     subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
                 if "exclusive" in self.listener.problems:
                     log("⚠ 遙控器被另一個程式佔用：請關掉其他 PlayRemote 或 playremote_mac.py")
+                if "no_seize" in self.listener.problems and n:
+                    log("ℹ 藍牙模式無法擋鍵（macOS 不讓第三方獨占已配對鍵盤）：自訂動作會觸發，但原本的按鍵也會照送，"
+                        "例如按 1 會開 Claude 同時也打出 1。")
                 last_n = n
                 if self.on_status:
                     self.on_status(n > 0, None)
             await asyncio.sleep(0.005)
-        if getattr(self, "_atvv_task", None):
-            self._atvv_task.cancel()
-            try:
-                await self._atvv_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+        if getattr(self, "_atvv_thread", None):
+            self._atvv_thread.join(timeout=2.0)         # 執行緒看到 self._stop 會自己收尾
         self.listener.stop()
 
     def request_stop(self):

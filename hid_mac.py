@@ -78,6 +78,7 @@ kIOHIDAccessTypeGranted = 0
 
 ERR_EXCLUSIVE = 0xE00002C5                # kIOReturnExclusiveAccess：被別的程式獨占
 ERR_NOT_PERMITTED = 0xE00002E2            # kIOReturnNotPermitted：沒有輸入監控權限
+ERR_NOT_PRIVILEGED = 0xE00002C1           # kIOReturnNotPrivileged：不允許獨占（macOS 不讓第三方獨占已配對鍵盤）
 
 
 def input_monitoring_granted() -> bool:
@@ -250,9 +251,11 @@ class HidListener:
                     self.problems.add("permission")
                     self.log("無法讀取藍牙遙控器：沒有「輸入監控」權限")
                     return
-                if code == ERR_EXCLUSIVE and seize:
-                    self.log("藍牙獨占失敗（被佔用），改用一般模式：擋鍵會失效，系統仍會收到按鍵")
-                    self.problems.add("exclusive")
+                # macOS 不允許第三方獨占已配對的藍牙鍵盤（NotPrivileged / Exclusive）→ 退回一般監聽模式。
+                # 收得到按鍵、動作照跑，但擋不掉原本的鍵（例如按 1 會同時打出 1）。
+                if code in (ERR_NOT_PRIVILEGED, ERR_EXCLUSIVE) and seize:
+                    self.problems.add("no_seize")
+                    self.log("藍牙無法獨占鍵盤（macOS 限制），改用監聽模式：按鍵/動作/語音可用，但擋鍵無效")
                     seize = False
                     ret = iokit.IOHIDDeviceOpen(d, kIOHIDOptionsTypeNone)
                     if ret != 0:
