@@ -12,6 +12,7 @@
    Appearance `03 19 C1 03` + `00 00`（AD 規格允許的非有效填充）。
    → 主廣播變成 Flags / UUID16 1812 / Appearance 0x03C1 / 名稱 PlayRemote。
 2. 掃描回應 @0x219e0：Appearance 0x0180（Generic Remote Control）改成 0x03C1（Keyboard），與主廣播一致。
+--minimal：只做第 2 項（2 bytes）。2026-10-15 對照 Mi Smart Mouse 的日誌後，這是最可能就足夠、也最安全的改法，建議第一輪先用它。
 3.（選用 --gatt-appearance）GATT 的 GAP Appearance 值 @0x2121E：0x0180 → 新值。
    位置是推定的：rodata 中緊接在 UUID 0x2A01 常數後面的 u16 0x0180。建議先不加，第一輪只改廣播。
 廠商資料 0x005D 仍保留在掃描回應中（若 USB 接收器或其他主機用它辨識，不受影響）。
@@ -33,6 +34,9 @@ def main():
     ap.add_argument("--appearance", type=lambda x: int(x, 0), default=0x03C1,
                     help="0x03C1 Keyboard（預設）/ 0x03C2 Mouse / 0x03C0 Generic HID / 0x0180 原值")
     ap.add_argument("--force", action="store_true", help="版本不同時仍嘗試（仍會逐項比對原始位元組）")
+    ap.add_argument("--minimal", action="store_true",
+                    help="只改掃描回應的 Appearance 值（2 bytes），主廣播完全不動。依 Mi Smart Mouse 對照：macOS 會讀到掃描回應的 "
+                         "appearance，只是 0x0180 不在它認得的類型裡（Aprc ?），改成 0x03C1 可能就足夠")
     ap.add_argument("--gatt-appearance", action="store_true",
                     help="一併修改 GATT 的 GAP Appearance 特徵值 @0x2121E（推定：緊接在 UUID 0x2A01 常數之後的 0x0180）")
     a = ap.parse_args()
@@ -47,6 +51,8 @@ def main():
         ("ADV：廠商資料 → Appearance", 0x219C3, bytes.fromhex("05ff5d005566"), bytes([0x03, 0x19]) + app + b"\x00\x00"),
         ("掃描回應：Appearance 0x0180 → 新值", 0x219E0, bytes.fromhex("03198001"), bytes([0x03, 0x19]) + app),
     ]
+    if a.minimal:
+        patches = [p for p in patches if p[1] == 0x219E0]
     if a.gatt_appearance:
         patches.append(("GATT GAP Appearance 值（推定位置）", 0x2121E, bytes.fromhex("8001"), app))
     for name, off, old, new in patches:

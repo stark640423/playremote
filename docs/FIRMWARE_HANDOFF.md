@@ -27,6 +27,14 @@
 
 ### 修補
 
+**第一輪建議用最小修補**（依 Mi Smart Mouse 對照，見 APPLE_BLE_HID_CHECKLIST.md）：
+
+```
+python fwpatch.py 2.4g+ble-pc.bin 2.4g+ble-pc_mac-minimal.bin --minimal
+```
+
+只改掃描回應 @0x219E2 的 2 bytes（Appearance 0x0180 → 0x03C1）。macOS 仍不提供連接時，再用完整修補：
+
 ```
 python fwpatch.py 2.4g+ble-pc.bin 2.4g+ble-pc_mac-patched.bin
 ```

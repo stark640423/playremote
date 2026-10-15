@@ -15,6 +15,19 @@
 
 結論：Apple 沒有把 PlayRemote 當成「可配對的輸入裝置」。下列各項請逐一核對。標 ★ 的是最可能的原因。
 
+## 2026-10-15 Mi Smart Mouse 對照結果（關鍵）
+
+| | Mi Smart Mouse（可配對） | PlayRemote（不可配對） |
+|---|---|---|
+| Settings 判斷 | `Finding image … (by LE appearance) with appearance:962 (Mouse)` | `Finding image … (default) … appeareance:384` |
+| CBDevice | `Aprc Mouse`，首次發現時就有 | `Aprc ?` |
+| 圖示 | Generic-Mouse.icns | Bluetooth.icns |
+| 廣播 | 名稱 / UUID 1812, 180F（Random 位址） | 名稱 / UUID 1812 / 廠商資料；掃描回應有 Appearance 0x0180 |
+
+結論：macOS **有讀到** PlayRemote 的 Appearance（384 = 0x0180），但 0x0180 Generic Remote Control 不在它對應的類型裡（`Aprc ?`），
+所以走 default、當成未知裝置、不提供連接。問題主要在**數值**而不是位置。
+→ 最小修補：只把掃描回應的 Appearance 改成 0x03C1（Keyboard），`fwpatch.py --minimal`（2 bytes）。不夠再用完整修補（主廣播也加入）。
+
 ## Mac 端能不能自己發起配對？（已驗證：不能）
 
 `pair_spi_mac.py` 實測：一般程序可以取得 CoreBluetooth 私有的 `CBPairingAgent` 並呼叫 `pairPeer:options:`，
