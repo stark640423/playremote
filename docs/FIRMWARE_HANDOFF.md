@@ -4,6 +4,62 @@
 
 先讀：`docs/APPLE_BLE_HID_CHECKLIST.md`（macOS 拒絕配對的原因與修改清單）、`NOTES.md`（GATT、ATVV、HID 格式）。
 
+## 2026-10-15 更新：找到產品韌體，修補檔已產生
+
+使用者在「下載項目」找到 `29A001烧录说明-在线烧录.rar`（**廠商資料，不進 repo**），已解壓到 `下載項目/29A001烧录说明-在线烧录/`，內含：
+
+| 檔案 | 說明 |
+|---|---|
+| `富臣游戏手柄_202208291530/2.4g+ble-pc.bin` | **遙控器產品韌體**（371,216 bytes，2022-08-29，sha256 `37cbd95d72fc5f81…`）。bank0 @0x00000（BLE，0x23D68 bytes）、bank @0x40000（0x1AA10 bytes，推測 2.4G 模式）|
+| `富臣游戏手柄_202208291530/dongle_28-pc.bin` | USB 接收器韌體（47,680 bytes）。不需要動 |
+| `PlayRemote烧录操作说明-2022831.docx` | 量產燒錄說明（含照片） |
+| `M02-在线烧录--Normal_download_tool_v8.5.2/` | Telink Normal download tool（Windows） |
+
+### 已確認的廣播陣列（bank0）
+
+| 位置 | 內容 |
+|---|---|
+| `0x219B0`（25 B）| ADV：`02 01 05` / `03 03 12 18` / `0B 09 "PlayRemote"` / `05 FF 5D 00 55 66` — **沒有 Appearance** |
+| `0x219CC`（15 B）| KMSWand 信標：`02 01 05` / `0B FF 5D 00 FF "KMSWand"` |
+| `0x219DC`（28 B）| 掃描回應：`03 03 12 18` / `03 19 80 01`（Appearance 0x0180）/ 名稱 / `05 FF 5D 00 55 88` / `00 00` |
+| `0x2121A` | rodata：UUID `0x2A01` 常數，後面 `0x2121E` 為 `80 01`（推定 GATT GAP Appearance 值）|
+| `0x21174`、`0x211AA` 附近 | HID 服務 1812 / Report Map 2A4B |
+
+### 修補
+
+```
+python fwpatch.py 2.4g+ble-pc.bin 2.4g+ble-pc_mac-patched.bin
+```
+
+- ADV 的廠商資料（6 B）換成 Appearance `03 19 C1 03` + `00 00` 填充；掃描回應的 Appearance 0x0180 → 0x03C1。
+- 共改 8 bytes，陣列長度不變；每個位置先比對原始位元組，不符就中止。
+- `--gatt-appearance` 會一併改 `0x2121E`（推定位置），**第一輪先不要加**。
+- 修補後檔案在 Mac 端已產生：`captures/firmware/remote_2.4g+ble_20220829_mac-patched.bin`（sha256 `edd817896974eb3d…`）。PC 端可自行用 fwpatch.py 從原檔重新產生，結果應相同。
+
+### 燒錄設定（取自量產說明）
+
+- 板上燒錄口 **J3：TX / GND / PRG / VCC_2V8**（新版板）。接 **GND、PRG（=SWS）、VCC**。舊版板（BT031F）是三針 GND / SWS / VCC。
+- Normal download tool v8.5.2：MCU **8255**、Mode **EVK**、Addr **0x000000**、Size x Sector **128**。
+  操作：Open 選 bin → 第 2 顆按鈕（連線/啟動）→ Download。
+- ⚠ **Size 128 = 下載前清除整片 512 KB**，會一併清掉 Flash 裡每支遙控器的資料（MAC 位址 @0x76000、與 USB 接收器的配對資訊等）。
+  工廠量產就是這樣燒，韌體應可自行處理，但**燒錄前必須先讀出整片備份**（BDT 或工具的讀取功能，0x0–0x80000），兩次比對一致才繼續。
+
+### 建議順序
+
+1. 讀出這支遙控器目前的韌體整片備份（`playremote_dump_1/2.bin`），`fwinspect.py --compare` 確認一致。
+2. `fwinspect.py playremote_dump_1.bin`，確認 0x219B0 附近的廣播陣列與 2022-08-29 版**相同**
+   （若不同，代表遙控器跑的是別的版本：改用 `fwpatch.py --force` 對 dump 修補，或回報 Mac 端重新分析）。
+3. 先在**備用機**燒錄修補檔，Mac 上驗證（見下方「驗證」）。
+4. 驗證通過才燒其他支；量產可改用 OTA（遙控器有 Telink OTA 服務）。
+5. 若 macOS 仍不提供配對：再試 `--gatt-appearance`，或 `--appearance 0x03C2`（Mouse）。
+
+### 驗證（Mac 端）
+
+- 系統設定 → 藍牙 → 附近裝置：PlayRemote 圖示應從通用藍牙變成鍵盤，點選後進入「我的裝置」。
+- Mac 有藍牙日誌描述檔，可查 `Finding image for "PlayRemote" … appeareance:961`（0x03C1 = 961）。
+- `hidutil list` 出現 VID 0x2D01 / PID 0x5000；方向鍵能移動焦點。
+- 同時確認 2.4G 模式（USB 接收器）仍正常；若接收器需要重新配對，記錄配對方式。
+
 ## 結論先講
 
 - macOS 26 / iOS 對 PlayRemote **只建立 LE 連線、不發起配對**。原因在遙控器的**廣播內容**，Mac 端沒有任何繞過方法
