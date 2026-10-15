@@ -9,7 +9,7 @@
 | 名稱 | PlayRemote（BLE 廣播名稱） |
 | PnP ID | Vendor 0x2D01, Product 0x5000, Version 0 |
 | MTU | 180 |
-| 晶片 | Telink（TLSR82xx 系列，由 OTA 服務 UUID 推定） |
+| 晶片 | **Telink TLSR8251**（內部認證資料與原理圖確認；板號 BT031F-TLS-001，方案 KEHWIN）。SWS 單線燒錄口：GND / SWS / VCC |
 | HID | **有**（服務 1812，HID over GATT）。Windows 配對後自動建立鍵盤 / Consumer Control / 滑鼠 / 遊戲控制器四個 HID collection。macOS CoreBluetooth 和 Windows WinRT 都對 App 隱藏這個服務，所以 `probe.py dump` 看不到它（handle 15–52 整段缺） |
 
 遙控器外觀：白色，上方圓形方向盤（中央 OK）；返回 / Home / 電源；數字 1–9；選單 / 0 / 退格；
