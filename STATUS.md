@@ -30,7 +30,8 @@
 | 安裝程式 | **Windows 與 macOS 皆完成**。macOS：`installer/build_mac.sh`（PyInstaller .app + DMG，ad-hoc 簽名，Info.plist 權限說明），GitHub Actions `macos` job 隨 `v*` 標籤發行。Windows：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
 | 系統匣 | **完成**：關閉視窗縮到系統匣，選單可重啟驅動、開機自啟、結束 |
 | macOS 版驅動（`playremote_mac.py`，USB 接收器） | **原型完成**：IOHIDManager 攔鍵（block 介面獨占、未設定鍵補送）、單擊/雙擊/長按、run/keys/text 動作（CGEvent）、語音鍵 hotkey（Fn 給 SogaType）/ builtin（USB 麥克風錄音 + macOS 內建辨識）。**v0.3.3 使用者實機驗收通過**（按鍵動作、介面亮燈、儲存並套用、語音鍵 Fn + 自動切換麥克風）。發行：已簽署並公證的 DMG，CI 隨 `v*` 標籤自動產生 |
-| macOS 藍牙 | **韌體修補後可配對**（Appearance 0x03C1 + HID CCC 需加密，兩個修補已於 PC 端套用、Mac 實測配對成功）。**藍牙模式驅動已做好**（2026-10-16）：單一 HID 鍵盤介面、report id 1/2/3 分流，按鍵/數字/陀螺儀/滾輪支援；`[remote] transport = "ble"` 切換，GUI 有「連接」下拉與「藍牙配對」鈕。待實機按鍵驗收。**藍牙語音鍵不送 HID（走 ATVV GATT），語音暫時仍只 USB 模式可用**。詳見 `docs/FIRMWARE_HANDOFF.md` 開頭。**USB 接收器：按鍵/陀螺儀/滾輪/麥克風實測可用** |
+| macOS 藍牙 | **韌體修補後可配對 + 驅動全通（2026-10-16 實機驗收）**。按鍵/數字/陀螺儀/滾輪、語音（按住說話→離線辨識→打字）都正常。`[remote] transport = "ble"` 切換，GUI 有「連接」下拉與「藍牙配對」鈕。實作重點：(1) 系統擁有的藍牙 HID 不能用 VID/PID 過濾、也不能用 manager 層級收報告→**逐裝置開啟**；(2) macOS 不讓第三方獨占已配對鍵盤（NotPrivileged）→退回**監聽模式**，故**藍牙無法擋鍵**（按 1 會開 Claude 同時也打出 1）；(3) 語音走 **ATVV GATT**（語音鍵不送 HID，遙控器自己送 AUDIO_START），放**獨立執行緒**跑 bleak，辨識用**子程序**（`--stt`）跑 macOS Speech。詳見 `docs/FIRMWARE_HANDOFF.md` 開頭。**USB 接收器模式：按鍵/陀螺儀/滾輪/麥克風一樣可用** |
+| 待改進（藍牙擋鍵） | macOS 不允許獨占已配對鍵盤，目前靠監聽模式，擋不掉原生按鍵。之後可改用 **CGEvent tap** 攔截並吞掉對應鍵來實現擋鍵（Karabiner 那類做法）|
 | 彩色四鍵、滑鼠圖示鍵 | 不送任何訊號給電腦（HID、ATVV、自訂服務都沒有），應為紅外線或本機功能，無法對應 |
 
 ## 2026-10-14 重大發現：USB 2.4G 接收器模式
