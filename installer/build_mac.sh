@@ -55,8 +55,7 @@ cat > "$STAGE/安裝說明.txt" <<'EOF'
 PlayRemote for macOS（USB 接收器模式）
 
 1. 把 PlayRemote 拖到 Applications。
-2. 第一次開啟會被擋下（未經 Apple 簽署）：在提示按「完成」，然後到
-   「系統設定 → 隱私權與安全性」最下方按「仍要打開」並輸入密碼，只需做一次。
+2. 打開 PlayRemote（已經 Apple 公證，可直接開啟）。
 3. 依系統提示允許：輸入監控（讀遙控器按鍵）、輔助使用（送出熱鍵）。
    沒跳出提示時請到「系統設定 → 隱私權與安全性」手動把 PlayRemote 加進這兩項，然後重開 App。
 4. 插上 PlayRemote 的 USB 接收器，視窗右上角會顯示「已連線」。
