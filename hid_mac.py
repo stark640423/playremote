@@ -104,14 +104,32 @@ KEYS_OF_IFACE = {"keyboard": set(KEY_NAMES_BY_KEYBOARD.values()),
                  "consumer": set(KEY_NAMES_BY_CONSUMER.values()),
                  "mouse": {"wheel_up", "wheel_down"}}
 
+# 藍牙配對模式：VID 0x2D01 / PID 0x5000，只有一個鍵盤介面 (page 1 / usage 6)，
+# 全部的鍵都走這個介面，用 report id 區分 (實測見 docs/FIRMWARE_HANDOFF.md)：
+#   id=1 鍵盤 (9B): 01 mod rsvd <鍵碼> …，鍵碼在 byte[3] 之後
+#   id=2 Consumer (6B): 02 LL HH …，usage 16-bit little-endian
+#   id=3 滑鼠 (7B): 03 <鍵> XL XH YL YH，陀螺儀位移 (signed LE) + 滾輪
+BLE_VID, BLE_PID = 0x2D01, 0x5000
+BLE_REPORT_KEYBOARD, BLE_REPORT_CONSUMER, BLE_REPORT_MOUSE = 1, 2, 3
+
 
 @dataclass
 class RemoteEvent:
-    kind: str          # "key" | "wheel"
+    kind: str          # "key" | "wheel" | "motion"
     name: str
     down: bool
     iface: str         # "keyboard" | "consumer" | "mouse"
     seized: bool       # 這個介面是否被獨占 (True 時系統沒收到，需要補送)
+    dx: int = 0        # kind=="motion" 時的滑鼠相對位移 (藍牙陀螺儀)
+    dy: int = 0
+
+
+def _s16(raw: bytes, off: int) -> int:
+    """從 off 取 little-endian 有號 16-bit (藍牙滑鼠陀螺儀位移)。"""
+    if off + 2 > len(raw):
+        return 0
+    v = raw[off] | (raw[off + 1] << 8)
+    return v - 0x10000 if v >= 0x8000 else v
 
 
 def _cfstr(s: str):
@@ -137,9 +155,11 @@ class HidListener:
 
     def __init__(self, on_event: Callable[[RemoteEvent], None], seize_ifaces: set[str] = frozenset(),
                  vid: int = 0x0610, pid: int = 0x1000, on_log: Optional[Callable[[str], None]] = None,
-                 on_raw: Optional[Callable[[str, bytes], None]] = None):
+                 on_raw: Optional[Callable[[str, bytes], None]] = None, transport: str = "usb"):
         self.on_event = on_event
-        self.seize = set(seize_ifaces) - {"mouse"}
+        self.transport = transport                 # "usb" (接收器) | "ble" (系統配對)
+        # USB：滑鼠介面獨立，永不獨占；藍牙：全部擠在一個介面，要擋鍵就得連滑鼠一起獨占並補送位移
+        self.seize = set(seize_ifaces) if transport == "ble" else set(seize_ifaces) - {"mouse"}
         self.vid, self.pid = vid, pid
         self.log = on_log or (lambda m: None)
         self.on_raw = on_raw
@@ -192,8 +212,13 @@ class HidListener:
     # ---- 回呼 ----
     def _on_add(self, ctx, result, sender, device):
         page, usage = _dev_int(device, "PrimaryUsagePage"), _dev_int(device, "PrimaryUsage")
-        iface = IFACE_NAMES.get((page, usage), f"page{page:x}/usage{usage:x}")
-        seize = iface in self.seize
+        if self.transport == "ble":
+            # 藍牙只有一個介面，所有報告都走它；只要任一邏輯介面要擋鍵，就得獨占整支
+            iface = "ble"
+            seize = bool(self.seize)
+        else:
+            iface = IFACE_NAMES.get((page, usage), f"page{page:x}/usage{usage:x}")
+            seize = iface in self.seize
         ret = iokit.IOHIDDeviceOpen(device, kIOHIDOptionsTypeSeizeDevice if seize else kIOHIDOptionsTypeNone)
         if ret != 0:
             code = ret & 0xffffffff
@@ -229,6 +254,9 @@ class HidListener:
             return
         raw = bytes(data[:length])
         iface, seized = info["iface"], info["seized"]
+        if iface == "ble":
+            self._on_ble_report(report_id, raw, length, seized)
+            return
         if iface == "keyboard" and report_id != 0xC5:
             return                                      # 0xC4 閒置心跳等
         if self.on_raw:
@@ -247,6 +275,34 @@ class HidListener:
             if length >= 6 and raw[5]:
                 wheel = raw[5] if raw[5] < 0x80 else raw[5] - 0x100
                 self.on_event(RemoteEvent("wheel", "wheel_up" if wheel > 0 else "wheel_down", True, iface, False))
+
+    def _on_ble_report(self, report_id: int, raw: bytes, length: int, seized: bool):
+        """藍牙單一介面：用 report id 分流成 keyboard / consumer / mouse 三種邏輯事件。"""
+        if report_id == BLE_REPORT_KEYBOARD:
+            if self.on_raw:
+                self.on_raw("keyboard", raw)
+            codes = {b for b in raw[3:length] if b}          # byte0=id,1=修飾,2=保留,之後才是鍵碼
+            names = {KEY_NAMES_BY_KEYBOARD.get(c, f"key{c:02x}") for c in codes}
+            self._diff("keyboard", names, seized)
+        elif report_id == BLE_REPORT_CONSUMER:
+            if length < 3:
+                return
+            if self.on_raw:
+                self.on_raw("consumer", raw)
+            usage = raw[1] | (raw[2] << 8)
+            names = {KEY_NAMES_BY_CONSUMER.get(usage, f"consumer{usage:03x}")} if usage else set()
+            self._diff("consumer", names, seized)
+        elif report_id == BLE_REPORT_MOUSE:
+            if self.on_raw:
+                self.on_raw("mouse", raw)
+            dx = _s16(raw, 2)
+            dy = _s16(raw, 4)
+            wheel = (raw[6] if raw[6] < 0x80 else raw[6] - 0x100) if length >= 7 else 0
+            if wheel:
+                self.on_event(RemoteEvent("wheel", "wheel_up" if wheel > 0 else "wheel_down", True, "mouse", seized))
+            if seized and (dx or dy):
+                # 介面被獨占 → 系統收不到陀螺儀位移，發 motion 事件讓驅動補送滑鼠移動
+                self.on_event(RemoteEvent("motion", "move", True, "mouse", seized, dx=dx, dy=dy))
 
     def _diff(self, iface: str, now: set[str], seized: bool):
         prev = self._pressed.get(iface, set())

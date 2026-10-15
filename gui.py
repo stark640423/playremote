@@ -106,6 +106,27 @@ class DriverWorker(QThread):
             self.driver.request_stop()
 
 
+class PairWorker(QThread):
+    log = Signal(str)
+    done = Signal(bool)
+
+    def __init__(self):
+        super().__init__()
+        self._stop = False
+
+    def run(self):
+        try:
+            import ble_pair_mac
+            ok = ble_pair_mac.pair(on_log=self.log.emit, should_stop=lambda: self._stop)
+            self.done.emit(ok)
+        except Exception as e:  # noqa: BLE001
+            self.log.emit(f"藍牙配對失敗：{type(e).__name__}: {e}")
+            self.done.emit(False)
+
+    def stop(self):
+        self._stop = True
+
+
 # ---------------------------------------------------------------- 遙控器圖
 class RemoteView(QWidget):
     """遙控器圖（assets/remote.png，沒有就畫示意圖）；按下的鍵會短暫亮起，點圖上的鍵會選到對應卡片。"""
@@ -470,8 +491,20 @@ class MainWindow(QMainWindow):
         b_log.setCheckable(True)
         b_log.toggled.connect(lambda on: self.logview.setVisible(on))
         bottom.addWidget(b_log)
+        if backend.BLE_PAIR:
+            bottom.addWidget(QLabel("連接："))
+            self.transport = QComboBox()
+            self.transport.addItems(["USB 接收器", "藍牙"])
+            self.transport.setCurrentIndex(1 if self.cfg["remote"].get("transport") == "ble" else 0)
+            self.transport.setToolTip("USB：插上接收器即用。藍牙：先用修補韌體在系統設定配對，再選這個。")
+            self.transport.currentIndexChanged.connect(self._mark_dirty)
+            bottom.addWidget(self.transport)
+            self.b_pair = QPushButton("藍牙配對")
+            self.b_pair.setToolTip("遙控器切到藍牙模式、長按 Home + 返回進配對模式後，按這裡觸發配對")
+            self.b_pair.clicked.connect(self.start_pairing)
+            bottom.addWidget(self.b_pair)
         b_open = QPushButton("開啟設定檔")
-        b_open.clicked.connect(lambda: os.startfile(CONFIG_PATH))
+        b_open.clicked.connect(lambda: backend.open_path(CONFIG_PATH))
         bottom.addWidget(b_open)
         self.b_save = QPushButton("儲存並套用")
         self.b_save.setStyleSheet("QPushButton { background: #2f6fed; color: white; padding: 6px 18px; border-radius: 6px; font-weight: 600; }")
@@ -574,8 +607,29 @@ class MainWindow(QMainWindow):
             card.highlight(True)
             QTimer.singleShot(400, lambda: card.highlight(False))
 
+    def start_pairing(self):
+        if getattr(self, "pair_worker", None) and self.pair_worker.isRunning():
+            return
+        self.b_pair.setEnabled(False)
+        self.b_pair.setText("配對中…")
+        self.logview.setVisible(True)
+        self.pair_worker = PairWorker()
+        self.pair_worker.log.connect(self._on_log)
+        self.pair_worker.done.connect(self._pairing_done)
+        self.pair_worker.start()
+
+    def _pairing_done(self, ok: bool):
+        self.b_pair.setEnabled(True)
+        self.b_pair.setText("藍牙配對")
+        if ok:
+            QMessageBox.information(self, APP_NAME, "已完成藍牙連線。請到「系統設定 → 藍牙 → 我的裝置」確認 PlayRemote 已連線，再按遙控器測試。")
+        else:
+            QMessageBox.warning(self, APP_NAME, "沒有連上 PlayRemote。請確認遙控器切到藍牙模式、長按 Home + 返回進入配對模式（燈快閃），再試一次。")
+
     def save_and_apply(self):
         self.cfg["input"]["enabled"] = self.enabled.isChecked()
+        if hasattr(self, "transport"):
+            self.cfg["remote"]["transport"] = "ble" if self.transport.currentIndex() == 1 else "usb"
         self.voice_card.apply_to(self.cfg["voice"])
         try:
             config_store.save(CONFIG_PATH, self.cfg)

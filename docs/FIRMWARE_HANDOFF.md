@@ -4,6 +4,32 @@
 
 先讀：`docs/APPLE_BLE_HID_CHECKLIST.md`（macOS 拒絕配對的原因與修改清單）、`NOTES.md`（GATT、ATVV、HID 格式）。
 
+## 2026-10-16（Mac）：藍牙配對成功後，做好藍牙模式驅動
+
+配對修補齊全後，遙控器以藍牙配對時在 macOS 呈現為**單一 HID 鍵盤介面**，VID `0x2D01` / PID `0x5000`
+（USB 接收器是 `0x0610`/`0x1000`、四個介面）。用 `hidwatch_mac.py --vid 0x2d01 --pid 0x5000` 實測，
+所有按鍵都走這一個介面，以 **report id** 區分（USB 模式是用不同介面區分）：
+
+| report id | 長度 | 格式 | 內容 |
+|---|---|---|---|
+| 1 鍵盤 | 9B | `01 mod rsvd K0 K1 …` | 鍵碼在 **byte[3]** 之後。52=上 51=下 50=左 4f=右；1e–27=1~9,0；2a=退格 |
+| 2 Consumer | 6B | `02 LL HH 00 00 00` | usage = LL\|HH<<8（little-endian）。41=OK 224=返回 223=home 40=選單 30=電源 e9/ea=音量 cd=播放 |
+| 3 滑鼠 | 7B | `03 btn XL XH YL YH W` | 陀螺儀位移 X=byte[2:4]、Y=byte[4:6]（signed LE）；W=byte[6] 滾輪 |
+
+- 鍵碼 / consumer usage 與 USB 模式**完全相同**，只有 report id 與介面數不同 → 共用同一組鍵名對照表。
+- **語音鍵在藍牙模式不送 HID**（實測沒有 Consumer 0x221）。語音在藍牙下應走 **ATVV GATT**（服務 ab5e0001…），
+  用 CoreBluetooth `retrieveConnectedPeripherals` 讀，尚未接上；目前 hotkey/builtin 語音仍只在 USB 模式可用。
+
+### 驅動這邊做了什麼（本 session）
+- `hid_mac.py`：`HidListener(transport="ble")`，單一介面依 report id 分流成 keyboard/consumer/mouse 邏輯事件；
+  要擋鍵時整支獨占（藍牙只有一個介面），未擋的鍵、滾輪、陀螺儀位移由驅動用 CGEvent 補送（`macio.mouse_move/scroll`）。
+- `playremote_mac.py`：讀 `[remote] transport = "usb"|"ble"` 選連接方式與 VID/PID；`motion` 事件→補送滑鼠移動。
+- `gui.py`：底部「連接：USB 接收器／藍牙」下拉 + 「藍牙配對」鈕（呼叫 `ble_pair_mac.py`，用 bleak 連一次觸發系統配對）。
+- `config_store.py`：`dumps` 會寫回 `transport` 與 macOS 的語音欄位（usb_key/mic/auto_mic/lang），存檔不再被洗掉。
+
+**待辦**：藍牙語音（ATVV over GATT），詳見 `audio.py` 既有的 `AtvvMic`；需確認系統已占用 HID 連線時仍能用
+`retrieveConnectedPeripherals` 併行讀 ATVV（之前「已連線未配對」時可讀）。
+
 ## 2026-10-15 晚間更新（PC）：備用機已讀出並寫入最小修補，待 Mac 驗證
 
 ### 連線與讀寫方法

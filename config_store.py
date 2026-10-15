@@ -12,7 +12,7 @@ GESTURES = ("single", "double", "long")
 ACTION_KEYS = ("run", "keys", "text")
 
 DEFAULTS = {
-    "remote": {"name": "PlayRemote", "address": "", "reconnect_seconds": 5},
+    "remote": {"name": "PlayRemote", "address": "", "reconnect_seconds": 5, "transport": "usb"},
     "input": {"enabled": True, "double_click_ms": 600, "long_press_ms": 500},
     "voice": {
         "mode": "hotkey", "hotkey": "f8", "hotkey_style": "hold", "save_wav": False, "min_seconds": 0.3,
@@ -98,6 +98,7 @@ def dumps(cfg: dict) -> str:
         f"name = {_s(r['name'])}",
         f"address = {_s(r['address'])}",
         f"reconnect_seconds = {_v(r['reconnect_seconds'])}",
+        f"transport = {_s(r.get('transport', 'usb'))}",
         "",
         "[input]",
         f"enabled = {_v(i['enabled'])}",
@@ -110,6 +111,12 @@ def dumps(cfg: dict) -> str:
         f"hotkey_style = {_s(v['hotkey_style'])}",
         f"save_wav = {_v(v['save_wav'])}",
         f"min_seconds = {_v(v['min_seconds'])}",
+    ]
+    # macOS 專用的語音欄位（Windows 版沒有就不寫，保持設定檔乾淨）
+    for key in ("usb_key", "mic", "auto_mic"):
+        if key in v:
+            lines.append(f"{key} = {_v(v[key])}")
+    lines += [
         "",
         "[voice.virtual_mic]",
         f"enabled = {_v(vm['enabled'])}",
@@ -120,9 +127,10 @@ def dumps(cfg: dict) -> str:
         f"command = {_s(st['command'])}",
         f"type_result = {_v(st['type_result'])}",
         f"append = {_s(st['append'])}",
-        "",
-        "[keys]",
     ]
+    if "lang" in st:
+        lines.append(f"lang = {_s(st['lang'])}")
+    lines += ["", "[keys]"]
     for name, e in cfg["keys"].items():
         parts = [f"block = {_v(e['block'])}"]
         for g in GESTURES:

@@ -99,3 +99,20 @@ else:
         else:
             subprocess.run(["launchctl", "unload", "-w", str(PLIST)], capture_output=True)
             PLIST.unlink(missing_ok=True)
+
+
+def open_path(path):
+    """用系統預設方式開啟檔案 / 資料夾（跨平台）。"""
+    import subprocess
+    p = str(path)
+    if IS_WIN:
+        import os
+        os.startfile(p)  # noqa: S606
+    elif IS_MAC:
+        subprocess.Popen(["open", p])
+    else:
+        subprocess.Popen(["xdg-open", p])
+
+
+# macOS 走藍牙配對（USB 接收器免配對；Windows 用系統原生配對流程）
+BLE_PAIR = IS_MAC

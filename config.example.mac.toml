@@ -2,7 +2,10 @@
 # 欄位與 Windows 版相同，差別只在動作裡的程式名與鍵名是 macOS 的寫法。
 
 [remote]
-# macOS 目前走 USB 接收器 (VID 0x0610 / PID 0x1000)，不需要藍牙配對。
+# usb : 2.4G 接收器 (VID 0x0610 / PID 0x1000)。插上即用，語音走接收器的 USB 麥克風「PlayRemote」。
+# ble : 系統藍牙直接配對 (VID 0x2D01 / PID 0x5000，需先用修補過的韌體配對)。按鍵 / 數字 / 陀螺儀 / 滾輪
+#       都支援；擋鍵時整支會被獨占、驅動自動補送沒擋的鍵與陀螺儀位移。
+#       ⚠ 藍牙模式下語音鍵不會送 HID 事件（語音走 ATVV GATT，尚未接上），所以 hotkey/builtin 語音暫時只有 USB 模式可用。
 transport = "usb"
 
 [voice]

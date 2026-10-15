@@ -123,6 +123,22 @@ def type_text(text: str):
         time.sleep(0.01)
 
 
+def mouse_move(dx: float, dy: float):
+    """相對移動滑鼠游標 (藍牙模式獨占介面時，用來補送陀螺儀的位移)。"""
+    loc = Quartz.CGEventGetLocation(Quartz.CGEventCreate(None))
+    x, y = loc.x + dx, loc.y + dy
+    ev = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, (x, y), Quartz.kCGMouseButtonLeft)
+    Quartz.CGEventSetIntegerValueField(ev, Quartz.kCGMouseEventDeltaX, int(dx))
+    Quartz.CGEventSetIntegerValueField(ev, Quartz.kCGMouseEventDeltaY, int(dy))
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+
+
+def scroll(lines: int):
+    """垂直捲動 (正值向上)。藍牙模式獨占介面時補送滾輪。"""
+    ev = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, int(lines))
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+
+
 def run(command: str):
     """啟動程式或指令。
     先試 `open -a <名稱>`（macOS 會自己找遍 /Applications、/System/Applications/Utilities 等位置，

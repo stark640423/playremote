@@ -133,13 +133,20 @@ class Driver:
             self.mic_switch = sw
             log("語音鍵按下時會把系統預設麥克風切成「PlayRemote」" + ("" if sw.available else "（目前找不到，插上接收器後生效）"))
 
+        # 連接方式：usb＝2.4G 接收器 (VID 0x0610)，ble＝系統藍牙配對 (VID 0x2D01)
+        self.transport = str(cfg.get("remote", {}).get("transport", "usb")).lower()
+        if self.transport not in ("usb", "ble"):
+            self.transport = "usb"
+        vid, pid = (hid_mac.BLE_VID, hid_mac.BLE_PID) if self.transport == "ble" else (0x0610, 0x1000)
+
         # 哪些介面要獨占：該介面裡有任一鍵 block=true，或語音鍵在該介面 (避免 search 鍵被系統當成 Spotlight)
         seize = set()
         for iface, names in hid_mac.KEYS_OF_IFACE.items():
             if any(self.keys.get(n, {}).get("block") for n in names) or self.voice_key in names:
                 seize.add(iface)
         self.listener = hid_mac.HidListener(
-            self.on_remote_event, seize_ifaces=seize, on_log=lambda m: log(f"  hid: {m}"),
+            self.on_remote_event, seize_ifaces=seize, vid=vid, pid=pid, transport=self.transport,
+            on_log=lambda m: log(f"  hid: {m}"),
             on_raw=(lambda iface, raw: log(f"  raw {iface}: {raw.hex(' ')}")) if verbose else None)
 
         if self.voice.get("mode", "hotkey") == "builtin":
@@ -164,6 +171,13 @@ class Driver:
         log(f"HID 監看啟動。獨占介面: {sorted(self.listener.seize) or '無'}；語音鍵: {self.voice_key}")
 
     def on_remote_event(self, ev: hid_mac.RemoteEvent):
+        if ev.kind == "motion":
+            # 藍牙獨占模式：陀螺儀位移系統收不到，補送滑鼠移動
+            try:
+                macio.mouse_move(ev.dx, ev.dy)
+            except Exception as e:  # noqa: BLE001
+                log(f"  補送滑鼠移動失敗: {e}")
+            return
         if self.on_key and (ev.down or ev.kind == "wheel"):
             try:
                 self.on_key(ev.name, "press")       # 介面亮燈：每次按下都通知，不等手勢判定
@@ -183,6 +197,11 @@ class Driver:
         if not entry or not entry["block"]:
             if ev.seized and ev.kind == "key":
                 self._replay(ev.name, ev.down)      # 介面被獨占但這個鍵沒要擋 → 補送回系統
+            elif ev.seized and ev.kind == "wheel":
+                try:
+                    macio.scroll(1 if ev.name == "wheel_up" else -1)
+                except Exception as e:  # noqa: BLE001
+                    log(f"  補送滾輪失敗: {e}")
         if not entry:
             return
         if ev.kind == "wheel":
@@ -359,7 +378,11 @@ class Driver:
             self.listener.pump(0.02)          # HID 回呼在這裡發生
             n = len(self.listener.devices)
             if n != last_n:
-                log(f"接收器 HID 介面: {n} 個" + ("" if n else "（請插上 PlayRemote USB 接收器）"))
+                if self.transport == "ble":
+                    hint = "（請確認 PlayRemote 已在系統藍牙配對並連線）"
+                else:
+                    hint = "（請插上 PlayRemote USB 接收器）"
+                log(f"遙控器 HID 介面: {n} 個" + ("" if n else hint))
                 if "permission" in self.listener.problems:
                     log("⚠ 讀不到遙控器按鍵（沒有「輸入監控」權限）。已打開設定頁：若清單裡已有 PlayRemote，"
                         "請先選它按「−」移除，再按「+」從「應用程式」加回 PlayRemote 並打開，然後重開 App。"
