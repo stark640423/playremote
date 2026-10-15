@@ -133,6 +133,11 @@ class Driver:
         log(f"HID 監看啟動。獨占介面: {sorted(self.listener.seize) or '無'}；語音鍵: {self.voice_key}")
 
     def on_remote_event(self, ev: hid_mac.RemoteEvent):
+        if self.on_key and (ev.down or ev.kind == "wheel"):
+            try:
+                self.on_key(ev.name, "press")       # 介面亮燈：每次按下都通知，不等手勢判定
+            except Exception:  # noqa: BLE001
+                pass
         if ev.name == self.voice_key and ev.kind == "key":
             if ev.down and not self.voice_down:
                 self.voice_down = True
