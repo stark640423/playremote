@@ -59,7 +59,7 @@ def transcribe_file(path: str, lang: str = "zh-TW", on_device: bool = True, time
             if result.isFinal():
                 done.set()
 
-    rec.recognitionTask_resultHandler_(req, handler)
+    rec.recognitionTaskWithRequest_resultHandler_(req, handler)
     rl = Foundation.NSRunLoop.currentRunLoop()
     deadline = Foundation.NSDate.dateWithTimeIntervalSinceNow_(timeout)
     while not done.is_set() and deadline.timeIntervalSinceNow() > 0:
