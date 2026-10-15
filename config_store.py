@@ -145,4 +145,6 @@ def dumps(cfg: dict) -> str:
 
 
 def save(path: Path, cfg: dict):
-    path.write_text(dumps(cfg), encoding="utf-8", newline="\n")
+    # 用 open() 指定 newline（Path.write_text 的 newline 參數要 Python 3.10+，打包環境是 3.9）
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(dumps(cfg))
