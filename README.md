@@ -98,7 +98,7 @@ MIT，見 [LICENSE](LICENSE)。VB-CABLE 是 VB-Audio 的軟體，請自行安裝
 從 [Releases](https://github.com/stark640423/playremote/releases) 下載 `PlayRemote-<版本>-macOS.dmg`：
 
 1. 把 PlayRemote 拖到 Applications。
-2. 第一次開啟：Finder 對 PlayRemote 按右鍵 → 打開 → 打開（App 未經 Apple 簽署，只需做一次；若仍被擋，到「系統設定 → 隱私權與安全性」最下方按「仍要打開」）。
+2. 第一次開啟會被 Gatekeeper 擋下（App 未經 Apple 簽署）：在提示按「完成」，到「系統設定 → 隱私權與安全性」最下方按「仍要打開」並輸入密碼，只需做一次。（macOS 14 以前可用右鍵 → 打開。）
 3. 允許「輸入監控」（讀遙控器按鍵）與「輔助使用」（送出熱鍵）；沒跳提示就到「系統設定 → 隱私權與安全性」手動加入 PlayRemote，然後重開 App。
 4. 插上遙控器附的 USB 接收器，視窗右上角顯示「已連線」。
 5. 語音鍵：按住說話。預設會自動把系統麥克風切成 PlayRemote 並按住 Fn，搭配 SogaType 等「Fn 按住說話」的語音輸入法。
