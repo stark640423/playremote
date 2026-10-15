@@ -157,8 +157,9 @@ class Driver:
     # ---------------- 按鍵 ----------------
     def start_input(self):
         if not hid_mac.input_monitoring_granted():
+            # 只觸發系統的授權提示（第一次才會跳）。是否真的沒權限，以實際開啟遙控器的結果為準：
+            # IOHIDCheckAccess 在剛授權或簽章版本更換後常回「未知」，直接提示會誤報。
             hid_mac.request_input_monitoring()
-            log("⚠ 需要「輸入監控」權限才能讀遙控器按鍵：系統設定 → 隱私權與安全性 → 輸入監控，打開 PlayRemote，然後重開 App")
         self.listener.start()
         log(f"HID 監看啟動。獨占介面: {sorted(self.listener.seize) or '無'}；語音鍵: {self.voice_key}")
 
