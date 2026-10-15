@@ -82,6 +82,37 @@ USB 接收器的韌體（dongle_28-pc.bin）沒有 OTA，必要時才用燒錄�
 - `hidutil list` 出現 VID 0x2D01 / PID 0x5000；方向鍵能移動焦點。
 - 同時確認 2.4G 模式（USB 接收器）仍正常；若接收器需要重新配對，記錄配對方式。
 
+## 2026-10-15 燒錄後 Mac 驗證：成功一半，問題已定位
+
+在備用機燒錄修補韌體（遙控器位址 A4:C1:38:18:B0:17），Mac 日誌：
+
+**已成功**：macOS 認得它是鍵盤——
+`Finding image … appearance:961 (Keyboard)`、`Aprc Keyboard`、`Detected keyboard LE HID`、`Compatible LE HID`、
+讀到 VID 0x2D01 / PID 0x5000、HID / DeviceInfo / Battery 服務、Report Map、電量 97%。廣播修補完全有效。
+
+**卡住**：`BTLEServer: Not creating HID device as the link is not encrypted`，HID 服務 30 秒逾時。
+日誌序列：連線 → `No security keys found` → macOS 嘗試加密 → `encryptionStatusChangedCb status=4803`（失敗）
+→ `Encryption is now disabled` → macOS **沒有發起 SMP 配對** → HID 逾時。
+
+**原因**：標準 BLE HID 流程是「macOS 讀一個需要加密的 HID 特徵值 → 裝置回 Insufficient Authentication → 觸發配對」。
+目前韌體的 HID 特徵值（Report / Report Map / HID Information 等）**沒有要求加密權限**，macOS 讀得到、不報錯、因而不發起配對。
+→ 第二個韌體修改：**把 HID 服務特徵值的存取權限設為「需要加密」（authentication/encryption required）**。
+
+### GATT 屬性表位置（已定位，bank0）
+
+| UUID 常數 | 位置 | 被引用於 |
+|---|---|---|
+| 0x1812 (HID service) | 0x21174 | 0x20BE8 |
+| 0x2A4B (Report Map) | 0x211AA | 0x20E0C |
+| 0x2A01 (Appearance) | 0x2121A | 0x20A34 |
+
+屬性表（attribute table）在 0x20A00–0x21000 一帶（每個 entry 指向 UUID 常數 + 權限/讀寫 callback）。Telink BLE SDK 的屬性表是
+`attribute_t my_Attributes[]`，每個 entry 有 `attNum, uuidLen, attrLen, attrMaxLen, uuid*, pAttrValue*, w, r`，權限在 flags。
+需要解出表結構，找到 HID 相關 entry 的權限欄位，改成需要加密（Telink 的 `ATT_PERMISSIONS_ENCRYPT_READ` 等）。
+這是程式碼結構的修補，比廣播難；若難以靜態修補，這是請 KEHWIN 改一行的最小需求（「HID characteristics 要求 encryption」）。
+
+Mac 端下一步協助：解析 0x20A00–0x21000 的屬性表，對照 Telink attribute_t 結構，標出要改的 byte。
+
 ## 結論先講
 
 - macOS 26 / iOS 對 PlayRemote **只建立 LE 連線、不發起配對**。原因在遙控器的**廣播內容**，Mac 端沒有任何繞過方法

@@ -57,7 +57,7 @@ Windows 版也可評估同樣走 USB（鍵盤攔截問題可能一併消失）�
 
 ## 下一步
 
-0. **藍牙（macOS/iOS）韌體修補**：已找到產品韌體（2022-08-29）與燒錄器，`fwpatch.py` 已產生修補檔（主廣播加入 Appearance 0x03C1）。下一步：備份原韌體 → 備用機燒錄修補檔 → Mac 驗證。見 `docs/FIRMWARE_HANDOFF.md`。
+0. **藍牙（macOS/iOS）韌體修補**：已找到產品韌體（2022-08-29）與燒錄器，`fwpatch.py` 已產生修補檔（主廣播加入 Appearance 0x03C1）。**已驗證**：Appearance 修補成功，macOS 認作鍵盤並連線；卡在 HID 特徵值未要求加密（macOS 不發起配對）。下一步：韌體把 HID 特徵值設為需加密。見 `docs/FIRMWARE_HANDOFF.md`。
 
 2. 內建離線語音辨識（whisper.cpp / faster-whisper / Vosk 擇一）。
 3. 程式碼簽章。

@@ -15,6 +15,11 @@
 
 結論：Apple 沒有把 PlayRemote 當成「可配對的輸入裝置」。下列各項請逐一核對。標 ★ 的是最可能的原因。
 
+## 2026-10-15 燒錄驗證：Appearance 修補成功，下一關是 HID 特徵值需加密
+
+改 Appearance 後 macOS 已認作鍵盤並連線，但 `Not creating HID device as the link is not encrypted`：
+HID 特徵值未要求加密 → macOS 不發起配對。**第 5 節「HID 特徵值讀取/通知需加密」是下一個要改的**。詳見 docs/FIRMWARE_HANDOFF.md。
+
 ## 2026-10-15 Mi Smart Mouse 對照結果（關鍵）
 
 | | Mi Smart Mouse（可配對） | PlayRemote（不可配對） |
