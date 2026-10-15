@@ -339,6 +339,17 @@ class Driver:
             if self.on_status:
                 self.on_status(False, None)
             raise RuntimeError("已經有另一個 PlayRemote 驅動在執行，請先關掉它")
+        try:
+            await self._run_locked()
+        finally:
+            self.listener.stop()
+            try:
+                self._lock.close()                 # 釋放單一實例鎖（App 內重新啟動驅動時才拿得到）
+            except Exception:  # noqa: BLE001
+                pass
+            self._lock = None
+
+    async def _run_locked(self):
         self.loop = asyncio.get_event_loop()
         inp = self.cfg.get("input", {})
         self.gd = GestureDetector(self.loop, self.fire, inp.get("double_click_ms", 600), inp.get("long_press_ms", 500))
@@ -350,7 +361,11 @@ class Driver:
             if n != last_n:
                 log(f"接收器 HID 介面: {n} 個" + ("" if n else "（請插上 PlayRemote USB 接收器）"))
                 if "permission" in self.listener.problems:
-                    log("⚠ 讀不到遙控器按鍵：請到 系統設定 → 隱私權與安全性 → 輸入監控 打開 PlayRemote，然後重開 App")
+                    log("⚠ 讀不到遙控器按鍵（沒有「輸入監控」權限）。已打開設定頁：若清單裡已有 PlayRemote，"
+                        "請先選它按「−」移除，再按「+」從「應用程式」加回 PlayRemote 並打開，然後重開 App。"
+                        "（更新或換簽章後，舊的授權項目會失效）")
+                    import subprocess
+                    subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
                 if "exclusive" in self.listener.problems:
                     log("⚠ 遙控器被另一個程式佔用：請關掉其他 PlayRemote 或 playremote_mac.py")
                 last_n = n
