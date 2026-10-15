@@ -42,8 +42,10 @@ class VirtualMic:
     def start(self, src_rate: Optional[int] = None):
         if src_rate:
             self.src_rate = src_rate
+        # latency="low" + 小 blocksize：盡量降低灌進虛擬麥克風的延遲（降低 SogaType 收音的 lag）
         self.stream = self.sd.OutputStream(device=self.idx, samplerate=self.target_rate,
-                                           channels=self.channels, dtype="float32")
+                                           channels=self.channels, dtype="float32",
+                                           latency="low", blocksize=0)
         self.stream.start()
 
     def feed(self, pcm_bytes: bytes):
