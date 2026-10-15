@@ -40,6 +40,24 @@ HERE = Path(__file__).resolve().parent
 DATA_DIR = (Path.home() / "Library" / "Application Support" / "PlayRemote") if getattr(sys, "frozen", False) else HERE
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_HANDLERS: list = []
+LOCK_PATH = Path.home() / "Library" / "Application Support" / "PlayRemote" / ".driver.lock"
+
+
+def acquire_single_instance():
+    """同一時間只能有一個驅動在跑（App 或命令列都一樣），否則會互搶遙控器。回傳鎖檔物件，拿不到回傳 None。"""
+    import fcntl
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    f = open(LOCK_PATH, "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    f.seek(0)
+    f.truncate()
+    f.write(str(__import__("os").getpid()))
+    f.flush()
+    return f
 
 
 def log(msg: str):
@@ -138,6 +156,9 @@ class Driver:
 
     # ---------------- 按鍵 ----------------
     def start_input(self):
+        if not hid_mac.input_monitoring_granted():
+            hid_mac.request_input_monitoring()
+            log("⚠ 需要「輸入監控」權限才能讀遙控器按鍵：系統設定 → 隱私權與安全性 → 輸入監控，打開 PlayRemote，然後重開 App")
         self.listener.start()
         log(f"HID 監看啟動。獨占介面: {sorted(self.listener.seize) or '無'}；語音鍵: {self.voice_key}")
 
@@ -211,7 +232,10 @@ class Driver:
         if mode == "hotkey":
             if self.mic_switch:
                 try:
+                    before = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
                     if self.mic_switch.switch():
+                        now = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
+                        log(f"  麥克風：{before} → {now}")
                         time.sleep(0.08)           # 讓 App 收到熱鍵時已經是新的預設麥克風
                     else:
                         log("  找不到 PlayRemote 麥克風，維持原本的麥克風")
@@ -257,6 +281,7 @@ class Driver:
     def _restore_mic(self):
         try:
             self.mic_switch.restore()
+            log(f"  麥克風切回：{coreaudio_mac.device_name(coreaudio_mac.get_default_input())}")
         except Exception as e:  # noqa: BLE001
             log(f"  切回麥克風失敗: {e}")
 
@@ -307,6 +332,12 @@ class Driver:
 
     # ---------------- 主迴圈 ----------------
     async def run(self):
+        self._lock = acquire_single_instance()
+        if self._lock is None:
+            log("⚠ 已經有另一個 PlayRemote 驅動在執行（App 或終端機裡的 playremote_mac.py），請先關掉它")
+            if self.on_status:
+                self.on_status(False, None)
+            raise RuntimeError("已經有另一個 PlayRemote 驅動在執行，請先關掉它")
         self.loop = asyncio.get_event_loop()
         inp = self.cfg.get("input", {})
         self.gd = GestureDetector(self.loop, self.fire, inp.get("double_click_ms", 600), inp.get("long_press_ms", 500))
@@ -317,6 +348,10 @@ class Driver:
             n = len(self.listener.devices)
             if n != last_n:
                 log(f"接收器 HID 介面: {n} 個" + ("" if n else "（請插上 PlayRemote USB 接收器）"))
+                if "permission" in self.listener.problems:
+                    log("⚠ 讀不到遙控器按鍵：請到 系統設定 → 隱私權與安全性 → 輸入監控 打開 PlayRemote，然後重開 App")
+                if "exclusive" in self.listener.problems:
+                    log("⚠ 遙控器被另一個程式佔用：請關掉其他 PlayRemote 或 playremote_mac.py")
                 last_n = n
                 if self.on_status:
                     self.on_status(n > 0, None)

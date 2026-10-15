@@ -534,6 +534,13 @@ class MainWindow(QMainWindow):
 
     def _on_log(self, line: str):
         self.logview.appendPlainText(line)
+        if "⚠" in line:
+            msg = line.split("⚠", 1)[1].strip()
+            shown = getattr(self, "_warned", set())
+            if msg not in shown:
+                shown.add(msg)
+                self._warned = shown
+                QTimer.singleShot(0, lambda m=msg: QMessageBox.warning(self, APP_NAME, m))
         self.statusline.setText(line[10:])
         try:
             with (backend.DATA_DIR / "playremote.log").open("a", encoding="utf-8") as f:

@@ -59,6 +59,26 @@ iokit.IOHIDDeviceRegisterInputReportCallback.argtypes = [ctypes.c_void_p, ctypes
 iokit.IOHIDDeviceGetProperty.restype = ctypes.c_void_p
 iokit.IOHIDDeviceGetProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
+iokit.IOHIDCheckAccess.restype = ctypes.c_int
+iokit.IOHIDCheckAccess.argtypes = [ctypes.c_int]
+iokit.IOHIDRequestAccess.restype = ctypes.c_bool
+iokit.IOHIDRequestAccess.argtypes = [ctypes.c_int]
+kIOHIDRequestTypeListenEvent = 1          # 「輸入監控」
+kIOHIDAccessTypeGranted = 0
+
+ERR_EXCLUSIVE = 0xE00002C5                # kIOReturnExclusiveAccess：被別的程式獨占
+ERR_NOT_PERMITTED = 0xE00002E2            # kIOReturnNotPermitted：沒有輸入監控權限
+
+
+def input_monitoring_granted() -> bool:
+    return iokit.IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+
+
+def request_input_monitoring() -> bool:
+    """跳出系統的「輸入監控」授權提示（只會在第一次時跳）；回傳目前是否已授權。"""
+    return bool(iokit.IOHIDRequestAccess(kIOHIDRequestTypeListenEvent))
+
+
 DeviceCB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
 ReportCB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int,
                             ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8), ctypes.c_long)
@@ -129,6 +149,7 @@ class HidListener:
         self._pressed: dict[str, set[str]] = {}   # iface → 目前按住的鍵名
         self._mgr = None
         self.opened = False
+        self.problems: set[str] = set()           # "permission" / "exclusive"
 
     @property
     def devices(self) -> list[dict]:
@@ -175,8 +196,16 @@ class HidListener:
         seize = iface in self.seize
         ret = iokit.IOHIDDeviceOpen(device, kIOHIDOptionsTypeSeizeDevice if seize else kIOHIDOptionsTypeNone)
         if ret != 0:
-            self.log(f"開啟 HID 介面 {iface} 失敗 (0x{ret & 0xffffffff:x})"
-                     + ("；獨占失敗，改為不獨占" if seize else "，可能缺「輸入監控」權限"))
+            code = ret & 0xffffffff
+            if code == ERR_NOT_PERMITTED:
+                self.problems.add("permission")
+                self.log(f"無法讀取 {iface}：沒有「輸入監控」權限")
+                return
+            if code == ERR_EXCLUSIVE:
+                self.problems.add("exclusive")
+                self.log(f"無法讀取 {iface}：被另一個程式佔用（是否還開著另一個 PlayRemote 或 playremote_mac.py？）")
+            else:
+                self.log(f"開啟 HID 介面 {iface} 失敗 (0x{code:x})")
             if seize:
                 seize = False
                 ret = iokit.IOHIDDeviceOpen(device, kIOHIDOptionsTypeNone)
