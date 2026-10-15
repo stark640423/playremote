@@ -4,6 +4,58 @@
 
 先讀：`docs/APPLE_BLE_HID_CHECKLIST.md`（macOS 拒絕配對的原因與修改清單）、`NOTES.md`（GATT、ATVV、HID 格式）。
 
+## 2026-10-15 晚間更新（PC）：備用機已讀出並寫入最小修補，待 Mac 驗證
+
+### 連線與讀寫方法
+
+- 燒錄器（Telink，USB VID 248A / PID 5320，Windows 以 `usbprint` 驅動辨識，不用另裝驅動）接遙控器 J3：
+  J3 印字由左到右 `TX / GND / PRG / VCC_2V8`，TX 空著；排線標籤 `− / PRG / +` 對 GND / PRG / VCC。
+  J3 是空孔，排針直插常接觸不良（燈只在插入瞬間閃一下、`No Swire Slave Device`），要往一側斜壓或焊排針。
+- 燒錄工具資料夾**要放純英文路徑**（例如 `C:\telink\`）：放在含簡體字的路徑下，繁中 Windows 會跳 `Create Process failed!`。
+- 用命令列 `bat\tcdb.exe` 比 GUI 安全（GUI 的 Download 會先清除 Size x Sector 指定的範圍）：
+  - 讀：`tcdb rf 0 -s 512k -o dump.txt`（位址為十六進位；輸出是**十六進位文字**，要自行轉回二進位）。
+  - 寫單一區段：`tcdb wf 21000 -i sector.bin -b -e`（只清除並寫入檔案涵蓋的 4K）。
+  - ⚠ `tcdb` **不加任何參數**時預設是 `wf -i boot.bin -m`（寫入），不要直接執行。
+
+### 備用機的韌體
+
+- 版本與 2022-08-29 原檔**不同**（bank0 0x1000 起約 1.4 萬 bytes 不同；0x40000 映像長度 0x1AB34 vs 原檔 0x1AA10），
+  但廣播陣列 0x219B0–0x219F8 的位置與內容完全相同，所以 `fwpatch.py --force` 可直接套用在 dump 上。
+- **0x0 第一個 4K 平常是空的（全 ff）**，兩種模式都一樣：
+  晶片因此從 0x40000 開機；BLE 模式時，0x40000 的程式把 0x31C00 的 4K 副本寫回 0x0 再開機進 bank0，之後 0x0 又被清掉。
+  （實測：BLE 開機過程中讀到 0x0 = 0x31C00 副本，完全一致；穩定後 0x0 又是全 ff。）
+  0x36FFC–0x37000 有一個狀態位元組會隨模式改變（2.4G 時 0x97、BLE 時 0xE0）。
+- 推論：**不要把 0x0 寫成完整韌體**，也不要用 GUI 清除整片後燒原廠合併檔，以免改變這套開機流程；修補只動 0x21000 那個區段。
+
+### 已完成
+
+1. BLE 模式整片讀兩次一致（sha256 `cefdf01ac3677313…`），2.4G 模式也讀了兩次；備份放在 `captures/`（不進 git）。
+2. `fwpatch.py --minimal --force` 對 dump 修補：只改 0x219E2–0x219E3（掃描回應 Appearance 0x0180 → 0x03C1）。
+3. 用 `tcdb wf 21000 ... -b -e` 只寫 0x21000 一個 4K 區段；讀回整片與預期完全相同，MAC 區（0x76000）未變。
+
+### Mac 驗證結果與第二個修補（CCC 需加密）
+
+- 只做 Appearance 修補後：macOS 認成鍵盤、會自動連線，但 `BTLEServer: Not creating HID device as the link is not encrypted`，
+  30 秒後 `Service "Human Interface Device" has timed out`；系統設定「附近的裝置」一直轉圈圈。
+- 原因：GATT 屬性表（**0x209B4**，`attribute_t` 每筆 24 bytes，共 80 個 handle，與 Mac 看到的 0x01–0x50 一致）裡，
+  HID 特徵值的權限只有 READ/WRITE（0x01/0x03），讀寫都不會回「需要加密」，macOS 就不發起配對。
+- Telink SDK 權限位元：READ 0x01、WRITE 0x02、AUTHOR 0x10、**ENCRYPT 0x20**、AUTHEN 0x40、SECURE_CONN 0x80
+  （`ATT_PERMISSIONS_ENCRYPT_READ 0x21`、`ENCRYPT_WRITE 0x22`）；SDK 文件建議把通知用的 CCC 設成 ENCRYPT_WRITE 觸發配對。
+- 修補：HID 服務內 5 個 CCC（handle 0x14、0x19、0x1D、0x24、0x28）的 perm 0x03 → **0x23**，
+  位置 0x20B96、0x20C0E、0x20C6E、0x20D16、0x20D76，只寫 0x20000 一個 4K 區段。
+- 結果（Mac 日誌）：`GATT is Asking to pair due to LE_ATT_ERROR_INSUFFICIENT_AUTHENTICATION startAutoPairing=1`
+  → Just Works 配對視窗 → `Encryption is now enabled` → 產生永久金鑰（bonding）。
+- 注意：配對前遙控器要在配對模式（長按 Home + 返回，藍燈閃）；macOS 26 系統設定的「連接」按鈕有時不出現，
+  可用 bleak 連線一次（`BleakClient` 連上後等待）讓系統 HID 服務接手並觸發配對。
+- 遙控器在配對模式時會自己清掉 0x74000 的舊配對紀錄，0x7D000 是它自己的狀態區，兩者都不用動。
+
+### 下一步
+
+- 確認按鍵可用、重開機後自動重連（日誌已見重連時以既有金鑰加密：`isPairing=0`、`Encryption is now enabled`）。
+- 2.4G 模式（USB 接收器）**尚未驗證**（測試用 Mac 沒有 USB-A 孔）；兩個修補只動 bank0（0x20000、0x21000），
+  0x40000 的 2.4G 映像未改，理論上不受影響，仍需實機確認。
+- 整理成 `fwpatch.py` 的選項（Appearance + CCC 加密），再決定量產用燒錄或 OTA。
+
 ## 2026-10-15 更新：找到產品韌體，修補檔已產生
 
 使用者在「下載項目」找到 `29A001烧录说明-在线烧录.rar`（**廠商資料，不進 repo**），已解壓到 `下載項目/29A001烧录说明-在线烧录/`，內含：
