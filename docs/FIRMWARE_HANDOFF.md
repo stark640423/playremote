@@ -53,6 +53,20 @@ python fwpatch.py 2.4g+ble-pc.bin 2.4g+ble-pc_mac-patched.bin
 4. 驗證通過才燒其他支；量產可改用 OTA（遙控器有 Telink OTA 服務）。
 5. 若 macOS 仍不提供配對：再試 `--gatt-appearance`，或 `--appearance 0x03C2`（Mouse）。
 
+### 之後改用藍牙 OTA 更新（目標：只有第一支用燒錄器）
+
+遙控器韌體有 Telink OTA 服務 `00010203-0405-0607-0809-0a0b0c0d1912`（特徵值 `…2b12`，write-without-response，**不需配對即可寫入**，Mac 上已實測可連線讀寫），
+所以理論上之後都能透過藍牙更新，Mac / Windows 的 PlayRemote App 都能當 OTA 主機（bleak）。燒錄器只用在第一支驗證。要先確認：
+
+1. **OTA 寫到哪個 bank**：Telink 825x 預設把新韌體寫到 0x40000，但這份產品韌體的 0x40000 放的是 2.4G 模式映像。
+   分析 dump 時要找出 OTA 目標位址（SDK 的 `ota_program_offset` / `bls_ota_set_fwSize_and_fwBootAddr` 設定）。
+   若 OTA 會覆蓋 2.4G 映像，就只能更新 BLE 部分或必須連 2.4G 映像一起處理。
+2. **OTA 映像格式**：產品燒錄檔 `2.4g+ble-pc.bin` 是兩個 bank 合併的整片，不是 OTA 檔。OTA 要用 bank0 那段（0x00000 起、長度看 0x18）
+   並依 Telink 規則附加 CRC（SDK 工具 `tl_check_fw`），末 4 bytes 目前是 `0x001e007d`，不是 CRC，代表這份不是 OTA 格式。
+3. **OTA 協定**：Telink BLE SDK 文件有（OTA start / data（index + 16 bytes + CRC16）/ end 命令），寫成 `ota.py` 後先在備用機試。
+4. 失敗時 Telink 雙 bank 機制會保留舊韌體，正常情況不會變磚；但要求電池電量足夠。
+USB 接收器的韌體（dongle_28-pc.bin）沒有 OTA，必要時才用燒錄器更新。
+
 ### 驗證（Mac 端）
 
 - 系統設定 → 藍牙 → 附近裝置：PlayRemote 圖示應從通用藍牙變成鍵盤，點選後進入「我的裝置」。
