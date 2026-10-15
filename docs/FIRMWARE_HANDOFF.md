@@ -136,7 +136,9 @@ USB 接收器的韌體（dongle_28-pc.bin）沒有 OTA，必要時才用燒錄�
 
 ## 2026-10-15 燒錄後 Mac 驗證：成功一半，問題已定位
 
-在備用機燒錄修補韌體（遙控器位址 A4:C1:38:18:B0:17），Mac 日誌：
+> **已解決**（同日稍晚，PC 端）：HID CCC 改為需加密後 macOS 自動發起配對、建立 HID 裝置。見本文件開頭「Mac 驗證結果與第二個修補」。以下保留當時的分析。
+
+在備用機燒錄修補韌體後，Mac 日誌：
 
 **已成功**：macOS 認得它是鍵盤——
 `Finding image … appearance:961 (Keyboard)`、`Aprc Keyboard`、`Detected keyboard LE HID`、`Compatible LE HID`、
@@ -163,7 +165,7 @@ USB 接收器的韌體（dongle_28-pc.bin）沒有 OTA，必要時才用燒錄�
 需要解出表結構，找到 HID 相關 entry 的權限欄位，改成需要加密（Telink 的 `ATT_PERMISSIONS_ENCRYPT_READ` 等）。
 這是程式碼結構的修補，比廣播難；若難以靜態修補，這是請 KEHWIN 改一行的最小需求（「HID characteristics 要求 encryption」）。
 
-Mac 端下一步協助：解析 0x20A00–0x21000 的屬性表，對照 Telink attribute_t 結構，標出要改的 byte。
+（已完成：屬性表在 0x209B4，每筆 24 bytes，perm 在偏移 +2；實際修補見開頭。）
 
 ## 結論先講
 
