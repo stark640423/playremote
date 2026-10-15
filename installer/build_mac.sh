@@ -10,7 +10,7 @@ echo "== 版本 $VERSION"
 
 rm -rf build dist
 "$PY" -m PyInstaller --noconfirm --clean --name PlayRemote --windowed gui.py \
-  --osx-bundle-identifier com.tvsoga.playremote \
+  --osx-bundle-identifier com.tvsoga.playremote --icon assets/PlayRemote.icns \
   --collect-all bleak --collect-all sounddevice --collect-all numpy \
   --hidden-import AppKit --hidden-import Speech --hidden-import Quartz --hidden-import tomli \
   --hidden-import playremote_mac --hidden-import hid_mac --hidden-import macio --hidden-import coreaudio_mac \

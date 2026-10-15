@@ -24,7 +24,7 @@ jobs:
 
       - name: Build exe (PyInstaller)
         run: >
-          pyinstaller --noconfirm --clean --name PlayRemote --windowed gui.py
+          pyinstaller --noconfirm --clean --name PlayRemote --windowed --icon assets/PlayRemote.ico gui.py
           --collect-all bleak --collect-submodules winrt --collect-binaries winrt --collect-data winrt
           --collect-all pycaw --collect-all comtypes --collect-all sounddevice --collect-all numpy
           --add-data "config.example.toml;." --add-data "assets;assets"

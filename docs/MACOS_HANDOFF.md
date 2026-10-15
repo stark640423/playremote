@@ -19,6 +19,12 @@ python3 -m venv .venv
 Windows 這邊若再改 `gui.py`，平台專屬的東西請放進 `backend.py` 的 Windows 分支，不要直接 import Windows 模組。
 `config_store.example_path()` 在 macOS 會改用 `config.example.mac.toml`。
 
+## 2026-10-15 App 圖示
+
+`installer/make_icon.py` 由 `assets/remote.png` 產生 `assets/icon.png`、`PlayRemote.icns`、`PlayRemote.ico`。
+Windows：release.yml 的 PyInstaller 加了 `--icon assets/PlayRemote.ico`，`playremote.iss` 加了 `SetupIconFile` / `UninstallDisplayIcon`。
+`gui.make_icon()` 改用 `assets/icon.png`（視窗、系統匣、選單列）。
+
 ## 分工
 
 - **Windows 這邊正在做**：設定介面（PySide6，SayAll 風格的按鍵映射頁）和系統匣。會動到 `playremote.py`、新增 `gui.py`，

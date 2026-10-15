@@ -29,6 +29,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#AppName}
+SetupIconFile=..\assets\PlayRemote.ico
+UninstallDisplayIcon={app}\PlayRemote.exe
 CloseApplications=yes
 RestartApplications=no
 #ifdef SIGN

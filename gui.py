@@ -54,6 +54,10 @@ def action_summary(act) -> str:
 
 
 def make_icon(size: int = 64) -> QIcon:
+    """App 圖示：assets/icon.png（installer/make_icon.py 由遙控器照片產生）；找不到時畫一個簡化的遙控器。"""
+    png = Path(getattr(sys, "_MEIPASS", HERE)) / "assets" / "icon.png"
+    if png.exists():
+        return QIcon(str(png))
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
