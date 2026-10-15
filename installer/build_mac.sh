@@ -27,8 +27,22 @@ plutil -replace NSMicrophoneUsageDescription -string "內建語音模式會從 P
 plutil -replace NSSpeechRecognitionUsageDescription -string "內建語音模式用 macOS 離線辨識把錄音轉成文字。" "$PLIST"
 plutil -replace NSBluetoothAlwaysUsageDescription -string "用藍牙探測 PlayRemote 遙控器（選用）。" "$PLIST"
 plutil -replace NSHumanReadableCopyright -string "MIT License" "$PLIST"
-# ad-hoc 簽名（無 Developer ID 時），讓 TCC 權限能記住這個 App
-codesign --force --deep --sign - "$APP"
+# 簽署：有 Developer ID 就正式簽（Hardened Runtime + entitlements），沒有就 ad-hoc
+#   環境變數 SIGN_IDENTITY="Developer ID Application: 公司名 (TEAMID)"
+ENT=installer/entitlements.plist
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  echo "== 以 Developer ID 簽署: $SIGN_IDENTITY"
+  # 先簽內層的 dylib / 執行檔，再簽 bundle（PyInstaller 的 Frameworks 很多，--deep 不可靠）
+  find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -u+x \) -not -path "*/Resources/*" -print0 \
+    | xargs -0 codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$SIGN_IDENTITY" 2>/dev/null || true
+  find "$APP/Contents/Frameworks" -type d \( -name "*.framework" -o -name "*.app" \) -print0 \
+    | xargs -0 -I{} codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$SIGN_IDENTITY" {} 2>/dev/null || true
+  codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$SIGN_IDENTITY" "$APP"
+  codesign --verify --deep --strict --verbose=1 "$APP"
+else
+  echo "== 無 SIGN_IDENTITY，使用 ad-hoc 簽名（使用者第一次開啟要到系統設定按「仍要打開」）"
+  codesign --force --deep --sign - "$APP"
+fi
 
 echo "== 做 DMG"
 DMG="dist/PlayRemote-$VERSION-macOS.dmg"
@@ -53,5 +67,23 @@ PlayRemote for macOS（USB 接收器模式）
 EOF
 hdiutil create -volname "PlayRemote $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
+
+# 公證：需要 notarytool 的憑證。二選一：
+#   NOTARY_PROFILE=名稱            （本機先用 `xcrun notarytool store-credentials 名稱 ...` 存過）
+#   NOTARY_KEY_ID / NOTARY_ISSUER_ID / NOTARY_KEY_P8=路徑   （App Store Connect API key，CI 用）
+if [ -n "${SIGN_IDENTITY:-}" ] && { [ -n "${NOTARY_PROFILE:-}" ] || [ -n "${NOTARY_KEY_ID:-}" ]; }; then
+  echo "== 公證 DMG"
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  else
+    xcrun notarytool submit "$DMG" --key "$NOTARY_KEY_P8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+  fi
+  xcrun stapler staple "$DMG"
+  xcrun stapler validate "$DMG"
+  spctl --assess --type open --context context:primary-signature -v "$DMG" || true
+else
+  echo "== 未公證（缺 SIGN_IDENTITY 或公證憑證）"
+fi
 ls -la "$DMG"
 echo "== 完成: $DMG"
