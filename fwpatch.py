@@ -22,12 +22,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import struct
+import sys
 from pathlib import Path
 
 KNOWN_SHA256 = "37cbd95d72fc5f81"   # 前 16 碼
 
 
 def main():
+    # Windows 中文主控台預設 cp950，印不出 ✓ 等字元
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("src")
     ap.add_argument("dst")

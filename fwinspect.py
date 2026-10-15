@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import struct
+import sys
 import zlib
 from pathlib import Path
 
@@ -74,6 +75,8 @@ def find_all(data: bytes, needle: bytes) -> list[int]:
 
 
 def main():
+    # Windows 中文主控台預設 cp950，印不出 ✓ 等字元
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("bin")
     ap.add_argument("--compare")
