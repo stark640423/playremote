@@ -113,7 +113,7 @@ def dumps(cfg: dict) -> str:
         f"min_seconds = {_v(v['min_seconds'])}",
     ]
     # macOS 專用的語音欄位（Windows 版沒有就不寫，保持設定檔乾淨）
-    for key in ("usb_key", "mic", "auto_mic"):
+    for key in ("usb_key", "mic", "auto_mic", "vmic_device"):
         if key in v:
             lines.append(f"{key} = {_v(v[key])}")
     lines += [
