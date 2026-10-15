@@ -469,9 +469,18 @@ class Driver:
                 pass
         if getattr(self, "_vmic", None):                 # hotkey 模式：切麥 + 送熱鍵（串流已開著）
             try:
+                t = getattr(self, "_voice_release_timer", None)   # 取消上一次的收尾，避免打斷這一次
+                if t:
+                    t.cancel()
+                    self._voice_release_timer = None
                 sw = getattr(self, "_vmic_switch", None)
-                if sw:
-                    sw.switch()                          # 系統預設麥克風 → 虛擬裝置，讓 App 收得到
+                if sw and not getattr(self, "_voice_mic_on", False):
+                    before = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
+                    ok = sw.switch()                     # 系統預設麥克風 → 虛擬裝置，讓 App 收得到
+                    time.sleep(0.1)                      # 等預設裝置切換生效，SogaType 才收到 BlackHole
+                    now = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
+                    log(f"  麥克風：{before} → {now}" + ("" if ok else "（切換回報失敗）"))
+                    self._voice_mic_on = True
                 combo = self.voice.get("hotkey", "fn")
                 style = self.voice.get("hotkey_style", "hold")
                 self._voice_combo = macio.parse_combo(combo)
@@ -486,25 +495,30 @@ class Driver:
     def _atvv_release(self):
         log("語音鍵放開（藍牙 ATVV）")
         if getattr(self, "_vmic", None):
-            try:
-                style = self.voice.get("hotkey_style", "hold")
-                if style == "hold" and getattr(self, "_voice_combo", None):
-                    macio.key_up(self._voice_combo)
-                elif style == "tap":
-                    macio.send_keys(self.voice.get("hotkey", "fn"))
-                self._voice_combo = None
-            except Exception as e:  # noqa: BLE001
-                log(f"  語音 hotkey 放開失敗：{e}")
+            # 緩衝裡還有尾音要播完，SogaType 才收得到整句 → 延遲收 Fn，再延遲切回麥克風
             import threading
-            threading.Timer(0.6, self._atvv_release_cleanup).start()   # 等 App 收完音再關
+            self._voice_release_timer = threading.Timer(0.35, self._voice_finish)
+            self._voice_release_timer.start()
 
-    def _atvv_release_cleanup(self):
+    def _voice_finish(self):
         try:
+            style = self.voice.get("hotkey_style", "hold")
+            if style == "hold" and getattr(self, "_voice_combo", None):
+                macio.key_up(self._voice_combo)          # 尾音播完才放開 Fn，句尾不被切
+            elif style == "tap":
+                macio.send_keys(self.voice.get("hotkey", "fn"))
+            self._voice_combo = None
+        except Exception as e:  # noqa: BLE001
+            log(f"  語音 hotkey 放開失敗：{e}")
+        try:
+            time.sleep(0.1)
             sw = getattr(self, "_vmic_switch", None)       # 串流保持開著，只把麥克風切回去
             if sw:
                 sw.restore()
+            self._voice_mic_on = False
         except Exception as e:  # noqa: BLE001
             log(f"  語音收尾失敗：{e}")
+        self._voice_release_timer = None
 
     async def transcribe(self, wav: Path):
         t0 = time.monotonic()

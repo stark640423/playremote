@@ -53,9 +53,12 @@ class VirtualMic:
             return
         np = self.np
         x = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        if self.src_rate != self.target_rate and len(x) > 1:
-            n_out = int(round(len(x) * self.target_rate / self.src_rate))
-            if n_out > 0:
+        if self.src_rate != self.target_rate and len(x) > 0:
+            factor = self.target_rate / self.src_rate
+            if abs(factor - round(factor)) < 1e-6:
+                x = np.repeat(x, int(round(factor)))        # 整數倍（16k→48k=3x）：直接重複，跨幀連續、無邊界雜訊
+            else:
+                n_out = int(round(len(x) * factor))
                 xi = np.linspace(0, len(x) - 1, n_out)
                 x = np.interp(xi, np.arange(len(x)), x).astype(np.float32)
         if self.channels == 2:
