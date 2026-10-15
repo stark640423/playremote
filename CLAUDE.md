@@ -5,7 +5,8 @@ BLE 語音遙控器「PlayRemote」的開源驅動程式（Windows 可用，macO
 開始任何工作前先讀：
 
 1. `STATUS.md`：目標、進度、已知限制、下一步。
-2. `NOTES.md`：GATT 服務對照、ATVV 0.4/1.0 行為、HID 報告格式與按鍵對照表、Windows 擋鍵的限制。
+2. `docs/FIRMWARE_HANDOFF.md`：**目前的主要待辦**——讀出 TLSR8251 韌體、修補廣播資料，讓 macOS/iOS 能藍牙配對。
+3. `NOTES.md`：GATT 服務對照、ATVV 0.4/1.0 行為、HID 報告格式與按鍵對照表、Windows 擋鍵的限制。
 
 程式都是 Python（依賴見 `requirements.txt` / `pyproject.toml`）：
 

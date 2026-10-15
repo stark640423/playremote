@@ -57,6 +57,8 @@ Windows 版也可評估同樣走 USB（鍵盤攔截問題可能一併消失）�
 
 ## 下一步
 
+0. **藍牙（macOS/iOS）韌體修補**：公司已找到 Telink 燒錄器。讀出 TLSR8251 韌體 → `fwinspect.py` 分析 → 修補廣播 → 寫回。步驟見 `docs/FIRMWARE_HANDOFF.md`。
+
 2. 內建離線語音辨識（whisper.cpp / faster-whisper / Vosk 擇一）。
 3. 程式碼簽章。
 5. 驗證 ATVV 的 MIC_CLOSE / MIC_EXTEND / 主機主動 MIC_OPEN，以及 1.0 模式的最長串流秒數。
