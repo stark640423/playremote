@@ -127,17 +127,18 @@ class Driver:
         self.voice_down = False
         self.recorder: Optional[Recorder] = None
         self._stop = False
-        self.mic_switch: Optional[coreaudio_mac.MicSwitcher] = None
-        if self.voice.get("auto_mic", True) and self.voice.get("mode", "hotkey") == "hotkey":
-            sw = coreaudio_mac.MicSwitcher(self.voice.get("mic", "PlayRemote"))
-            self.mic_switch = sw
-            log("語音鍵按下時會把系統預設麥克風切成「PlayRemote」" + ("" if sw.available else "（目前找不到，插上接收器後生效）"))
-
         # 連接方式：usb＝2.4G 接收器 (VID 0x0610)，ble＝系統藍牙配對 (VID 0x2D01)
         self.transport = str(cfg.get("remote", {}).get("transport", "usb")).lower()
         if self.transport not in ("usb", "ble"):
             self.transport = "usb"
         vid, pid = (hid_mac.BLE_VID, hid_mac.BLE_PID) if self.transport == "ble" else (0x0610, 0x1000)
+
+        # 自動切麥克風只用於 USB 模式（藍牙沒有系統麥克風可切，語音走 ATVV）
+        self.mic_switch: Optional[coreaudio_mac.MicSwitcher] = None
+        if self.transport == "usb" and self.voice.get("auto_mic", True) and self.voice.get("mode", "hotkey") == "hotkey":
+            sw = coreaudio_mac.MicSwitcher(self.voice.get("mic", "PlayRemote"))
+            self.mic_switch = sw
+            log("語音鍵按下時會把系統預設麥克風切成「PlayRemote」" + ("" if sw.available else "（目前找不到，插上接收器後生效）"))
 
         # 哪些介面要獨占：該介面裡有任一鍵 block=true，或語音鍵在該介面 (避免 search 鍵被系統當成 Spotlight)
         seize = set()
@@ -149,7 +150,7 @@ class Driver:
             on_log=lambda m: log(f"  hid: {m}"),
             on_raw=(lambda iface, raw: log(f"  raw {iface}: {raw.hex(' ')}")) if verbose else None)
 
-        if self.voice.get("mode", "hotkey") == "builtin":
+        if self.transport == "usb" and self.voice.get("mode", "hotkey") == "builtin":
             try:
                 self.recorder = Recorder(self.voice.get("mic", "PlayRemote"))
                 if not self.recorder.available:
@@ -320,6 +321,55 @@ class Driver:
         if self.loop:
             self.loop.create_task(self.transcribe(out))
 
+    # ---------------- 藍牙語音 (ATVV over GATT) ----------------
+    async def _run_atvv(self):
+        """藍牙模式的語音：訂閱 ATVV，遙控器按住麥克風鍵時收串流 → 解碼 → 離線辨識 → 打進目前視窗。
+
+        與 USB 不同：語音鍵不送 HID，是遙控器自己在 ATVV 送 AUDIO_START/STOP（Android TV 模式）；
+        藍牙沒有系統麥克風可切，所以一律走內建辨識（不做 hotkey / 虛擬麥克風）。
+        """
+        import audio
+        import probe
+        name = self.cfg.get("remote", {}).get("name", "PlayRemote")
+        log("藍牙語音：背景連線 ATVV 中（遙控器要醒著並保持在系統藍牙連線）")
+        while not self._stop:
+            try:
+                async with probe.open_client(name) as client:
+                    mic = audio.AtvvMic(
+                        client, on_utterance=self._atvv_utterance,
+                        on_press=self._atvv_press, on_release=self._atvv_release,
+                        log=lambda m: log(f"  atvv: {m}"))
+                    await mic.start(negotiate_v10=True)
+                    log("藍牙語音已就緒：按住遙控器麥克風鍵說話，放開後會離線辨識並打字。")
+                    while client.is_connected and not self._stop:
+                        await asyncio.sleep(0.1)
+                        await mic.tick()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:  # noqa: BLE001
+                log(f"藍牙語音連線中斷：{type(e).__name__}: {e}")
+            if self._stop:
+                break
+            await asyncio.sleep(3)          # 遙控器睡眠/斷線後，等一下再重連
+
+    def _atvv_press(self):
+        log("語音鍵按下（藍牙 ATVV）")
+        if self.on_key:
+            try:
+                self.on_key(self.voice_key, "press")     # GUI 亮燈
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _atvv_release(self):
+        log("語音鍵放開（藍牙 ATVV）")
+
+    def _atvv_utterance(self, pcm: bytes, rate: int):
+        # ATVV 的回呼在事件迴圈執行緒；直接走既有的存檔 + 辨識 + 打字流程
+        try:
+            self.on_utterance(pcm, rate)
+        except Exception as e:  # noqa: BLE001
+            log(f"藍牙語音處理失敗：{e}")
+
     async def transcribe(self, wav: Path):
         t0 = time.monotonic()
         cmd = self.stt.get("command", "")
@@ -373,6 +423,10 @@ class Driver:
         inp = self.cfg.get("input", {})
         self.gd = GestureDetector(self.loop, self.fire, inp.get("double_click_ms", 600), inp.get("long_press_ms", 500))
         self.start_input()
+        # 藍牙模式：語音鍵不送 HID，語音改走 ATVV GATT。開一條背景連線訂閱，遙控器按住麥克風鍵時收串流→解碼→辨識→打字。
+        self._atvv_task = None
+        if self.transport == "ble" and self.voice.get("mode", "hotkey") != "none":
+            self._atvv_task = self.loop.create_task(self._run_atvv())
         last_n = -1
         while not self._stop:
             self.listener.pump(0.02)          # HID 回呼在這裡發生
@@ -395,6 +449,12 @@ class Driver:
                 if self.on_status:
                     self.on_status(n > 0, None)
             await asyncio.sleep(0.005)
+        if getattr(self, "_atvv_task", None):
+            self._atvv_task.cancel()
+            try:
+                await self._atvv_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         self.listener.stop()
 
     def request_stop(self):
