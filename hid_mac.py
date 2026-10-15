@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -168,6 +169,7 @@ class HidListener:
         self.on_event = on_event
         self.transport = transport                 # "usb" (接收器) | "ble" (系統配對)
         self._ble_seized = False
+        self._last_ble_scan = 0.0
         # USB：滑鼠介面獨立，永不獨占；藍牙：全部擠在一個介面，要擋鍵就得連滑鼠一起獨占並補送位移
         self.seize = set(seize_ifaces) if transport == "ble" else set(seize_ifaces) - {"mouse"}
         self.vid, self.pid = vid, pid
@@ -184,66 +186,98 @@ class HidListener:
     @property
     def devices(self) -> list[dict]:
         if self.transport == "ble" and self._mgr:
-            self._refresh_ble_devices()               # 遙控器睡眠/喚醒時狀態才會即時更新
+            now = time.monotonic()
+            if now - self._last_ble_scan > 0.5:        # 節流：最多每 0.5 秒重新列舉一次
+                self._last_ble_scan = now
+                self._ble_scan_and_open()              # 遙控器睡眠→喚醒後，重新開啟並更新狀態
         return list(self._devices.values())
 
     def start(self) -> bool:
         self._mgr = iokit.IOHIDManagerCreate(None, kIOHIDOptionsTypeNone)
-        match = cf.CFDictionaryCreateMutable(None, 0, ctypes.byref(kCFTypeDictionaryKeyCallBacks),
-                                             ctypes.byref(kCFTypeDictionaryValueCallBacks))
-        cf.CFDictionarySetValue(match, _cfstr("VendorID"), _cfnum(self.vid))
-        cf.CFDictionarySetValue(match, _cfstr("ProductID"), _cfnum(self.pid))
-        iokit.IOHIDManagerSetDeviceMatching(self._mgr, match)
         report_cb = ReportCB(self._on_report)
         add_cb = DeviceCB(self._on_add)
         rm_cb = DeviceCB(self._on_remove)
         self._cbs += [report_cb, add_cb, rm_cb]
         self._report_cb = report_cb
-        iokit.IOHIDManagerRegisterDeviceMatchingCallback(self._mgr, add_cb, None)
-        iokit.IOHIDManagerRegisterDeviceRemovalCallback(self._mgr, rm_cb, None)
-        iokit.IOHIDManagerScheduleWithRunLoop(self._mgr, cf.CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
         if self.transport == "ble":
-            # 藍牙是系統擁有的裝置，matching callback 不一定會觸發；直接用 manager 層級開啟＋收報告。
-            # 只有一個介面，要擋鍵就整支獨占 (seize)，否則一般開啟讓系統也收得到。
+            # 藍牙是系統擁有的裝置：VendorID/ProductID 過濾會讓它列舉不到，manager 層級的
+            # input report callback 也收不到。所以不過濾、列舉全部、用 Python 比對 VID，
+            # 再「逐裝置」開啟並註冊 callback（實測這條才收得到報告）。
             self._ble_seized = bool(self.seize)
-            opt = kIOHIDOptionsTypeSeizeDevice if self._ble_seized else kIOHIDOptionsTypeNone
-            ret = iokit.IOHIDManagerOpen(self._mgr, opt)
-            if ret != 0 and self._ble_seized:
-                code = ret & 0xffffffff
-                self.log(f"藍牙獨占開啟失敗 (0x{code:x})，改用一般模式（擋鍵可能失效，系統仍會收到按鍵）")
-                self.problems.add("exclusive")
-                self._ble_seized = False
-                ret = iokit.IOHIDManagerOpen(self._mgr, kIOHIDOptionsTypeNone)
+            iokit.IOHIDManagerSetDeviceMatching(self._mgr, None)
+            self._ble_scan_and_open()
+        else:
+            match = cf.CFDictionaryCreateMutable(None, 0, ctypes.byref(kCFTypeDictionaryKeyCallBacks),
+                                                 ctypes.byref(kCFTypeDictionaryValueCallBacks))
+            cf.CFDictionarySetValue(match, _cfstr("VendorID"), _cfnum(self.vid))
+            cf.CFDictionarySetValue(match, _cfstr("ProductID"), _cfnum(self.pid))
+            iokit.IOHIDManagerSetDeviceMatching(self._mgr, match)
+            iokit.IOHIDManagerRegisterDeviceMatchingCallback(self._mgr, add_cb, None)
+            iokit.IOHIDManagerRegisterDeviceRemovalCallback(self._mgr, rm_cb, None)
+            iokit.IOHIDManagerScheduleWithRunLoop(self._mgr, cf.CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
+            # USB：不用 manager 開裝置，改成每個介面各自開 (才能決定哪些要獨占)
+        self.opened = True
+        return True
+
+    def _ble_scan_and_open(self):
+        """列舉所有 HID 裝置，對 VID 符合、還沒開的藍牙裝置逐一開啟並註冊 report callback。
+
+        遙控器睡眠後指標失效會從 CopyDevices 消失；喚醒後是新物件，再被這裡開一次。
+        """
+        dset = iokit.IOHIDManagerCopyDevices(self._mgr)
+        n = cf.CFSetGetCount(dset) if dset else 0
+        if not n:
+            # 裝置都不在了（遙控器睡眠/斷線）：清掉舊的，下次喚醒重開
+            self._devices.clear()
+            return
+        arr = (ctypes.c_void_p * n)()
+        cf.CFSetGetValues(dset, arr)
+        present = set()
+        for d in arr:
+            if not d:
+                continue
+            if (_dev_int(d, "VendorID") & 0xffff) != (self.vid & 0xffff):
+                continue
+            key = int(d)
+            present.add(key)
+            if key in self._devices:
+                continue                                  # 已經開過
+            seize = self._ble_seized
+            ret = iokit.IOHIDDeviceOpen(d, kIOHIDOptionsTypeSeizeDevice if seize else kIOHIDOptionsTypeNone)
             if ret != 0:
                 code = ret & 0xffffffff
                 if code == ERR_NOT_PERMITTED:
                     self.problems.add("permission")
-                self.log(f"開啟藍牙 HID 失敗 (0x{code:x})")
-                self.opened = False
-                return False
+                    self.log("無法讀取藍牙遙控器：沒有「輸入監控」權限")
+                    return
+                if code == ERR_EXCLUSIVE and seize:
+                    self.log("藍牙獨占失敗（被佔用），改用一般模式：擋鍵會失效，系統仍會收到按鍵")
+                    self.problems.add("exclusive")
+                    seize = False
+                    ret = iokit.IOHIDDeviceOpen(d, kIOHIDOptionsTypeNone)
+                    if ret != 0:
+                        self.log(f"開啟藍牙 HID 失敗 (0x{ret & 0xffffffff:x})")
+                        continue
+                else:
+                    self.log(f"開啟藍牙 HID 失敗 (0x{code:x})")
+                    continue
             buf = (ctypes.c_uint8 * 64)()
             self._bufs.append(buf)
-            iokit.IOHIDManagerRegisterInputReportCallback(self._mgr, buf, 64, report_cb, None)
-            self._refresh_ble_devices()
-        # USB：不用 manager 開裝置，改成每個介面各自開 (才能決定哪些要獨占)
-        self.opened = True
-        return True
-
-    def _refresh_ble_devices(self):
-        """列舉目前符合的藍牙裝置，填進 _devices（供狀態列顯示介面數）。"""
-        dset = iokit.IOHIDManagerCopyDevices(self._mgr)
-        n = cf.CFSetGetCount(dset) if dset else 0
-        arr = (ctypes.c_void_p * n)()
-        if n:
-            cf.CFSetGetValues(dset, arr)
-        self._devices = {int(d): {"iface": "ble", "seized": self._ble_seized} for d in arr if d}
+            iokit.IOHIDDeviceRegisterInputReportCallback(d, buf, 64, self._report_cb, None)
+            iokit.IOHIDDeviceScheduleWithRunLoop(d, cf.CFRunLoopGetCurrent(), kCFRunLoopDefaultMode)
+            self._devices[key] = {"iface": "ble", "seized": seize, "ref": d}
+            self.log("藍牙遙控器已連上" + ("（獨占）" if seize else ""))
+        # 丟掉已經不在清單上的（睡眠/斷線）
+        for key in list(self._devices):
+            if key not in present:
+                self._devices.pop(key, None)
 
     def stop(self):
         """關閉所有介面（解除獨占），之後按鍵恢復由系統處理。"""
         if self.transport == "ble":
-            if self._mgr:
+            for info in list(self._devices.values()):   # 逐裝置關閉（解除獨占）
                 try:
-                    iokit.IOHIDManagerClose(self._mgr, kIOHIDOptionsTypeNone)
+                    iokit.IOHIDDeviceClose(info["ref"], kIOHIDOptionsTypeNone)
                 except Exception:  # noqa: BLE001
                     pass
         else:
@@ -298,8 +332,9 @@ class HidListener:
 
     def _on_report(self, ctx, result, sender, rtype, report_id, data, length):
         if self.transport == "ble":
-            # manager 層級的回呼，sender 可能對不上列舉的指標，直接用整支的獨占狀態
-            self._on_ble_report(report_id, bytes(data[:length]), length, self._ble_seized)
+            info = self._devices.get(int(sender)) if sender else None
+            seized = info["seized"] if info else self._ble_seized
+            self._on_ble_report(report_id, bytes(data[:length]), length, seized)
             return
         info = self._devices.get(sender)
         if not info:
