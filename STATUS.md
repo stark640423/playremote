@@ -1,6 +1,6 @@
 # 專案狀態與路線圖
 
-更新：2026-10-14
+更新：2026-10-16
 
 ## 目標
 
@@ -30,7 +30,7 @@
 | 安裝程式 | **Windows 與 macOS 皆完成**。macOS：`installer/build_mac.sh`（PyInstaller .app + DMG，ad-hoc 簽名，Info.plist 權限說明），GitHub Actions `macos` job 隨 `v*` 標籤發行。Windows：PyInstaller + Inno Setup（`installer/playremote.iss`），per-user 安裝、可選開機自啟；GitHub Actions 推 `v*` 標籤自動建 Release。未簽章 |
 | 系統匣 | **完成**：關閉視窗縮到系統匣，選單可重啟驅動、開機自啟、結束 |
 | macOS 版驅動（`playremote_mac.py`，USB 接收器） | **原型完成**：IOHIDManager 攔鍵（block 介面獨占、未設定鍵補送）、單擊/雙擊/長按、run/keys/text 動作（CGEvent）、語音鍵 hotkey（Fn 給 SogaType）/ builtin（USB 麥克風錄音 + macOS 內建辨識）。**v0.3.3 使用者實機驗收通過**（按鍵動作、介面亮燈、儲存並套用、語音鍵 Fn + 自動切換麥克風）。發行：已簽署並公證的 DMG，CI 隨 `v*` 標籤自動產生 |
-| macOS 藍牙 | 探測工具齊全。**藍牙：已確認為韌體問題**（Appearance 在掃描回應且為 0x0180，設定頁不分類為 HID；第三方 App 無法發起配對，見 `docs/APPLE_BLE_HID_CHECKLIST.md`）。**USB 接收器：按鍵/陀螺儀/滾輪/麥克風實測可用**，Mac 版以此為主 |
+| macOS 藍牙 | **韌體修補後可配對**（Appearance 0x03C1 + HID CCC 需加密，兩個修補已於 PC 端套用、Mac 實測配對成功）。**藍牙模式驅動已做好**（2026-10-16）：單一 HID 鍵盤介面、report id 1/2/3 分流，按鍵/數字/陀螺儀/滾輪支援；`[remote] transport = "ble"` 切換，GUI 有「連接」下拉與「藍牙配對」鈕。待實機按鍵驗收。**藍牙語音鍵不送 HID（走 ATVV GATT），語音暫時仍只 USB 模式可用**。詳見 `docs/FIRMWARE_HANDOFF.md` 開頭。**USB 接收器：按鍵/陀螺儀/滾輪/麥克風實測可用** |
 | 彩色四鍵、滑鼠圖示鍵 | 不送任何訊號給電腦（HID、ATVV、自訂服務都沒有），應為紅外線或本機功能，無法對應 |
 
 ## 2026-10-14 重大發現：USB 2.4G 接收器模式
