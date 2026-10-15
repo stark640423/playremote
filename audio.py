@@ -154,8 +154,11 @@ class AtvvMic:
         self.last_frame: Optional[float] = None
         self.caps: Optional[bytes] = None
         self.last_codec = 0x01
+        self.negotiate_v10 = True
+        self._caps_resent = 0
 
     async def start(self, negotiate_v10: bool = True):
+        self.negotiate_v10 = negotiate_v10
         await self.client.start_notify(ATVV_CTL, self._on_ctl)
         await self.client.start_notify(ATVV_RX, self._on_audio)
         if negotiate_v10:
@@ -206,6 +209,15 @@ class AtvvMic:
             self.on_press()
         self.frames += 1
         self.last_frame = time.monotonic()
+        if len(data) == 134 and self.negotiate_v10 and self.frames == 1 and self._caps_resent < 3:
+            # 遙控器重開機 (例如換電池) 後會回到 0.4 模式 (按一下送 18 秒)，之前送的 GET_CAPS 失效，再送一次
+            self._caps_resent += 1
+            self.log("收到 0.4 格式的幀，重送 GET_CAPS 1.0 (遙控器可能重開機過)")
+            try:
+                asyncio.get_running_loop().create_task(
+                    self.client.write_gatt_char(ATVV_TX, CMD_GET_CAPS_V10, response=False))
+            except RuntimeError:
+                pass
         chunk = self.dec.on_frame(data)
         if self.on_pcm and chunk:
             self.on_pcm(chunk, self.dec.rate)

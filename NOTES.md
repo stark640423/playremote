@@ -160,6 +160,9 @@ Windows 上用 HID API 讀報告格式：直接 `CreateFile` 開這些 collectio
 - Windows：WinRT 和系統 HID 共用同一條連線，所以 bleak 訂閱 ATVV 麥克風時，按鍵仍然由系統當鍵盤滑鼠處理，兩邊同時運作。
 - Windows：前一個 bleak 程序被強制結束後，下一次連線常會報 `Characteristic ab5e0004 was not found`（WinRT 的服務快取不完整），
   `BleakClient(..., winrt={"use_cached_services": False})` 可避免。
+- Windows：每次斷線（不論 `is_connected` 狀態）都要呼叫 `client.disconnect()`，否則 WinRT 的裝置物件和通知訂閱會留著；
+  遙控器之後自己連回 Windows（HID）時舊訂閱會復活，而新的連線只拿到一半的服務，變成「已連線 → Characteristic not found」無限循環。
+- 遙控器重開機（例如換電池、給別台配對）後會回到 ATVV 0.4 模式；驅動看到 134 bytes 的幀就自動重送 GET_CAPS 1.0。
 - macOS：目前配對卡在系統設定一直轉圈，HID 服務因此沒建立。Windows 一次就配對成功，所以是 macOS 端流程問題，不是協定問題。
 
 ## 虛擬麥克風（Windows）

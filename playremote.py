@@ -399,11 +399,14 @@ class Driver:
                 self.connected = False
                 self.battery = None
                 self._notify_status()
+                # 一定要 disconnect，不管 is_connected：否則 WinRT 的裝置物件和通知訂閱會留著，
+                # 遙控器下次自己連回 Windows 時舊的訂閱會復活、新的連線只拿到一半的服務
                 try:
-                    if client.is_connected:
-                        await asyncio.wait_for(asyncio.shield(client.disconnect()), 5)
+                    await asyncio.wait_for(asyncio.shield(client.disconnect()), 5)
                 except Exception:  # noqa: BLE001
                     pass
+                mic = None
+                client = None
             if not self._stop:
                 await asyncio.sleep(retry)
 

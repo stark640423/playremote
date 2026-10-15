@@ -4,7 +4,7 @@
 
 #define AppName "PlayRemote"
 #ifndef AppVersion
-  #define AppVersion "0.2.1"
+  #define AppVersion "0.2.2"
 #endif
 #define AppPublisher "stark640423"
 #define AppURL "https://github.com/stark640423/playremote"
