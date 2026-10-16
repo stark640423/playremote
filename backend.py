@@ -32,8 +32,8 @@ else:
     HOTKEY_DEFAULT = "fn"
     HOTKEY_PLACEHOLDER = "fn、rcmd、f18、ctrl…"
     STYLE_OPTIONS = [("hold", "按住（hold）"), ("tap", "各按一下（tap，切換式）"), ("double", "連按兩下（macOS 聽寫）")]
-    VOICE_HINT = ("SogaType / 豆包：熱鍵 fn、hold。Typeless：fn、tap。macOS 內建聽寫：ctrl、連按兩下。"
-                  "麥克風：請在語音輸入 App（或系統設定 → 聲音 → 輸入）選「PlayRemote」。")
+    VOICE_HINT = ("SogaType：熱鍵 fn、hold。Typeless：fn、tap。macOS 內建聽寫：ctrl、連按兩下。"
+                  "麥克風：USB 模式選「PlayRemote」；藍牙模式會自動用虛擬麥克風（BlackHole）。")
     STT_PLACEHOLDER = "留空 = macOS 內建離線辨識；或填外部指令，{wav} 代表錄音檔"
     MIC_NOTE = "遙控器的麥克風會以「PlayRemote」出現在系統的輸入裝置裡（USB 接收器）；關掉上面的選項就要自己在語音輸入 App 裡選它。"
     TRANSPORT_NOTE = "USB 接收器"
