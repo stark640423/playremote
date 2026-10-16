@@ -393,7 +393,7 @@ class Driver:
         log("藍牙語音：背景連線 ATVV 中（遙控器要醒著並保持在系統藍牙連線）")
         while not self._stop:
             try:
-                async with probe.open_client(name) as client:
+                async with probe.open_client(name, on_log=lambda m: log(f"  atvv: {m}")) as client:
                     mic = audio.AtvvMic(
                         client, on_utterance=on_utt, on_pcm=on_pcm,
                         on_press=self._atvv_press, on_release=self._atvv_release,

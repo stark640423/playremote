@@ -52,7 +52,7 @@ async def find_paired_address_windows(name: str) -> str | None:
     return None
 
 
-async def find_system_connected(name: str):
+async def find_system_connected(name: str, on_log=print):
     """找出已經被 macOS 連上 (在系統藍牙設定裡顯示「已連線」) 的裝置。
 
     已連線的 BLE 裝置不會再廣播，一般掃描看不到，要用 retrieveConnectedPeripherals。
@@ -82,7 +82,9 @@ async def find_system_connected(name: str):
     # 2) 查 macOS 目前已連線、且有常見服務的裝置
     uuids = [CBUUID.UUIDWithString_(u) for u in
              ("1800", "1801", "180A", "180F", "1812", "1813")]
-    for p in mgr.central_manager.retrieveConnectedPeripheralsWithServices_(uuids) or []:
+    conn = mgr.central_manager.retrieveConnectedPeripheralsWithServices_(uuids) or []
+    on_log(f"系統已連線裝置: {[ (p.name() or '?') for p in conn] or '無'}")
+    for p in conn:
         pname = p.name() or ""
         if name.lower() in pname.lower():
             return BLEDevice(str(p.identifier().UUIDString()), pname, (p, mgr))
@@ -125,38 +127,37 @@ async def find_device(name: str, timeout: float = 15.0):
 
 
 @asynccontextmanager
-async def open_client(name: str, tries: int = 6):
+async def open_client(name: str, tries: int = 6, on_log=print):
     """找到裝置後連線；連線逾時就重新掃描再試 (遙控器常在廣播後很快睡著)。"""
     for attempt in range(1, tries + 1):
         try:
-            dev = await find_system_connected(name)
+            dev = await find_system_connected(name, on_log=on_log)
         except Exception as e:  # noqa: BLE001
-            print(f"  (查詢系統已連線裝置失敗: {e})")
+            on_log(f"查詢系統已連線裝置失敗: {type(e).__name__}: {e}")
             dev = None
         if dev is not None:
-            print(f"直接取用系統端的裝置物件: {dev.name} ({dev.address})")
+            on_log(f"直接取用系統端的裝置物件: {dev.name} ({dev.address})")
         else:
             dev = await find_device(name, timeout=10.0)
         if dev is None:
-            print(f"  (第 {attempt}/{tries} 次) 沒掃到，請按遙控器任意鍵...")
+            on_log(f"(第 {attempt}/{tries} 次) 沒找到裝置，請按遙控器任意鍵...")
             continue
         client = BleakClient(dev, timeout=20.0, winrt={"use_cached_services": False})
         try:
-            print(f"找到 {dev.name} ({dev.address})，連線中 (第 {attempt}/{tries} 次)，"
-                  "請持續按遙控器按鍵保持喚醒...")
+            on_log(f"找到 {dev.name} ({dev.address})，連線中 (第 {attempt}/{tries} 次)…")
             await client.connect()
         except (asyncio.TimeoutError, BleakError, OSError) as e:
-            print(f"  連線失敗: {type(e).__name__} {e}")
+            on_log(f"連線失敗: {type(e).__name__} {e}")
             try:
                 await client.disconnect()
             except Exception:  # noqa: BLE001
                 pass
             await asyncio.sleep(1)
             continue
-        # Windows 上系統 HID 佔著連線時，WinRT 的服務探索偶爾只回傳一部分；沒看到 ATVV 服務就重連再試
+        # 系統 HID 佔著連線時，服務探索偶爾只回傳一部分；沒看到 ATVV 服務就重連再試
         uuids = {s.uuid.lower() for s in client.services}
         if "ab5e0001-5a21-4f05-bc7d-af01f617b664" not in uuids:
-            print(f"  服務列表不完整 ({len(uuids)} 個服務，缺 ATVV)，重新連線...")
+            on_log(f"服務列表不完整 ({len(uuids)} 個服務，缺 ATVV)，重新連線…")
             try:
                 await client.disconnect()
             except Exception:  # noqa: BLE001
@@ -169,10 +170,8 @@ async def open_client(name: str, tries: int = 6):
             if client.is_connected:
                 await client.disconnect()
         return
-    raise SystemExit(
-        "多次嘗試仍無法連線。可能原因: 遙控器需要先在系統「配對」才允許連線、"
-        "電量不足，或仍被其他裝置佔用。"
-    )
+    # 用一般例外（不是 SystemExit）→ 呼叫端的 except Exception 接得到，可重試不會讓執行緒默默死掉
+    raise RuntimeError("多次嘗試仍無法連線 ATVV（遙控器睡眠、電量不足、或被其他裝置佔用）")
 
 
 async def cmd_scan(_args):
