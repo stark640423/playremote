@@ -378,7 +378,8 @@ class Driver:
                     log(f"藍牙語音(hotkey)：聲音會灌進虛擬麥克風「{self._vmic.name}」，並送熱鍵 "
                         f"{self.voice.get('hotkey', 'fn')} 給語音輸入 App")
                     self._vmic_switch = coreaudio_mac.MicSwitcher(self._vmic.name)
-                    self._vmic.start(src_rate=16000)     # 串流開著，避免每次按下才開造成開頭被切掉
+                    # 不在這裡開串流：串流一直開會讓 BlackHole 一直處於「錄音中」狀態（使用者會以為麥克風沒關）。
+                    # 改成按住語音鍵才開、放開就關。
                 else:
                     log("藍牙語音(hotkey)：找不到虛擬麥克風（請先安裝 BlackHole 並在設定填裝置名稱），"
                         "這段語音會改用內建辨識打字。")
@@ -467,19 +468,22 @@ class Driver:
                 self.on_key(self.voice_key, "press")     # GUI 亮燈
             except Exception:  # noqa: BLE001
                 pass
-        if getattr(self, "_vmic", None):                 # hotkey 模式：切麥 + 送熱鍵（串流已開著）
+        if getattr(self, "_vmic", None):                 # hotkey 模式：開串流 + 切麥 + 送熱鍵
             try:
                 t = getattr(self, "_voice_release_timer", None)   # 取消上一次的收尾，避免打斷這一次
                 if t:
                     t.cancel()
                     self._voice_release_timer = None
-                sw = getattr(self, "_vmic_switch", None)
-                if sw and not getattr(self, "_voice_mic_on", False):
-                    before = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
-                    ok = sw.switch()                     # 系統預設麥克風 → 虛擬裝置，讓 App 收得到
-                    time.sleep(0.1)                      # 等預設裝置切換生效，SogaType 才收到 BlackHole
-                    now = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
-                    log(f"  麥克風：{before} → {now}" + ("" if ok else "（切換回報失敗）"))
+                if not getattr(self, "_voice_mic_on", False):
+                    if not self._vmic.stream:
+                        self._vmic.start(src_rate=16000)  # 只有按住時才開串流（閒置時 BlackHole 不會在錄音狀態）
+                    sw = getattr(self, "_vmic_switch", None)
+                    if sw:
+                        before = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
+                        ok = sw.switch()                 # 系統預設麥克風 → 虛擬裝置，讓 App 收得到
+                        time.sleep(0.1)                  # 等預設裝置切換生效，SogaType 才收到 BlackHole
+                        now = coreaudio_mac.device_name(coreaudio_mac.get_default_input())
+                        log(f"  麥克風：{before} → {now}" + ("" if ok else "（切換回報失敗）"))
                     self._voice_mic_on = True
                 combo = self.voice.get("hotkey", "fn")
                 style = self.voice.get("hotkey_style", "hold")
@@ -512,9 +516,11 @@ class Driver:
             log(f"  語音 hotkey 放開失敗：{e}")
         try:
             time.sleep(0.1)
-            sw = getattr(self, "_vmic_switch", None)       # 串流保持開著，只把麥克風切回去
+            sw = getattr(self, "_vmic_switch", None)       # 切回麥克風，並關掉串流（BlackHole 回到非錄音狀態）
             if sw:
                 sw.restore()
+            if getattr(self, "_vmic", None) and self._vmic.stream:
+                self._vmic.stop()
             self._voice_mic_on = False
         except Exception as e:  # noqa: BLE001
             log(f"  語音收尾失敗：{e}")
