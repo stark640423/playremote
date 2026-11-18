@@ -365,8 +365,16 @@ class VoiceCard(QFrame):
         lay.addWidget(self.mode, 1, 1)
         lay.addWidget(QLabel("熱鍵："), 2, 0)
         hk = QHBoxLayout()
-        self.hotkey = QLineEdit(voice.get("hotkey", backend.HOTKEY_DEFAULT))
-        self.hotkey.setPlaceholderText(backend.HOTKEY_PLACEHOLDER)
+        self.hotkey = QComboBox()
+        self.hotkey.setEditable(True)                    # 可從清單選、也可自己打
+        self.hotkey.addItems(getattr(backend, "HOTKEY_PRESETS", [backend.HOTKEY_DEFAULT]))
+        cur_hk = voice.get("hotkey", backend.HOTKEY_DEFAULT)
+        if self.hotkey.findText(cur_hk) < 0:
+            self.hotkey.insertItem(0, cur_hk)
+        self.hotkey.setCurrentText(cur_hk)
+        self.hotkey.lineEdit().setPlaceholderText(backend.HOTKEY_PLACEHOLDER)
+        self.hotkey.setToolTip("點一下從常用熱鍵選，或直接輸入（例如 fn、rcmd、f13、cmd+space）。\n"
+                               "要跟你的語音輸入 App 設的那顆一樣。")
         self.style = QComboBox()
         self.style.addItems([label for _k, label in backend.STYLE_OPTIONS])
         style_keys = [k for k, _l in backend.STYLE_OPTIONS]
@@ -396,8 +404,8 @@ class VoiceCard(QFrame):
         lay.addWidget(hint, 7, 0, 1, 2)
         for w in (self.mode, self.style):
             w.currentIndexChanged.connect(lambda _i: self.changed.emit())
-        for w in (self.hotkey, self.stt):
-            w.textChanged.connect(lambda _t: self.changed.emit())
+        self.hotkey.currentTextChanged.connect(lambda _t: self.changed.emit())
+        self.stt.textChanged.connect(lambda _t: self.changed.emit())
         for w in (self.vmic, self.save_wav):
             w.toggled.connect(lambda _b: self.changed.emit())
         if backend.VMIC_SUPPORTED:
@@ -415,7 +423,7 @@ class VoiceCard(QFrame):
 
     def apply_to(self, voice: dict):
         voice["mode"] = ["hotkey", "builtin", "none"][self.mode.currentIndex()]
-        voice["hotkey"] = self.hotkey.text().strip() or backend.HOTKEY_DEFAULT
+        voice["hotkey"] = self.hotkey.currentText().strip() or backend.HOTKEY_DEFAULT
         voice["hotkey_style"] = backend.STYLE_OPTIONS[self.style.currentIndex()][0]
         mic_key = backend.MIC_OPTION[0]
         if mic_key == "virtual_mic.enabled":

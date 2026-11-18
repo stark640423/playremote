@@ -17,6 +17,7 @@ if IS_WIN:
     MIC_OPTION = ("virtual_mic.enabled", "把遙控器的麥克風當成電腦的預設麥克風（需要 VB-CABLE）")
     HOTKEY_DEFAULT = "f8"
     HOTKEY_PLACEHOLDER = "f8、win+h、ctrl+win…"
+    HOTKEY_PRESETS = ["f8", "win+h", "ctrl+win", "f13", "f18"]
     STYLE_OPTIONS = [("hold", "按住（hold）"), ("tap", "各按一下（tap，切換式）")]
     VOICE_HINT = "SogaType：熱鍵 f8；SogaType 設「按住說話」用 hold，設「切換」用 tap。Windows 內建語音輸入：win+h、tap。"
     STT_PLACEHOLDER = "內建模式用，{wav} 代表錄音檔，例如 whisper-cli.exe -m model.bin -l zh -nt -np -f {wav}"
@@ -31,6 +32,7 @@ else:
     MIC_OPTION = ("auto_mic", "按住語音鍵時自動把系統麥克風切成「PlayRemote」，放開後切回原本的")
     HOTKEY_DEFAULT = "fn"
     HOTKEY_PLACEHOLDER = "fn、rcmd、f18、ctrl…"
+    HOTKEY_PRESETS = ["fn", "f13", "f18", "rcmd", "ctrl", "cmd+space"]
     STYLE_OPTIONS = [("hold", "按住（hold）"), ("tap", "各按一下（tap，切換式）"), ("double", "連按兩下（macOS 聽寫）")]
     VOICE_HINT = ("SogaType：熱鍵 fn、hold。Typeless：fn、tap。macOS 內建聽寫：ctrl、連按兩下。"
                   "麥克風：USB 模式選「PlayRemote」；藍牙模式會自動用虛擬麥克風（BlackHole）。")
