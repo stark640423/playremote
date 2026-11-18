@@ -9,6 +9,15 @@ VERSION="${1:-$(grep -E '^version' pyproject.toml | head -1 | sed -E 's/.*"([^"]
 echo "== 版本 $VERSION"
 
 rm -rf build dist
+
+# BlackHole 虛擬麥克風安裝程式（打包進 app，讓使用者在 hotkey 模式下一鍵安裝）。缺了就下載官方公證版。
+BH=installer/vendor/BlackHole2ch-0.7.1.pkg
+if [ ! -f "$BH" ]; then
+  echo "== 下載 BlackHole 安裝程式"
+  mkdir -p installer/vendor
+  curl -fsSL -o "$BH" "https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg"
+fi
+
 "$PY" -m PyInstaller --noconfirm --clean --name PlayRemote --windowed gui.py \
   --osx-bundle-identifier com.tvsoga.playremote --icon assets/PlayRemote.icns \
   --collect-all bleak --collect-all sounddevice --collect-all numpy \
@@ -16,7 +25,8 @@ rm -rf build dist
   --hidden-import playremote_mac --hidden-import hid_mac --hidden-import macio --hidden-import coreaudio_mac \
   --hidden-import virtualmic_mac \
   --hidden-import gestures --hidden-import stt --hidden-import probe --hidden-import audio \
-  --add-data "config.example.mac.toml:." --add-data "config.example.toml:." --add-data "assets:assets"
+  --add-data "config.example.mac.toml:." --add-data "config.example.toml:." --add-data "assets:assets" \
+  --add-data "$BH:vendor"
 
 APP=dist/PlayRemote.app
 PLIST="$APP/Contents/Info.plist"

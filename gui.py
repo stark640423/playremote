@@ -442,6 +442,30 @@ class MainWindow(QMainWindow):
         self.start_driver()
         if not start_hidden:
             self.show()
+        self._maybe_offer_blackhole()
+
+    def _maybe_offer_blackhole(self):
+        """hotkey 語音模式但沒裝 BlackHole 時，提示安裝（內建的安裝程式，不用自己下載）。"""
+        if not backend.IS_MAC:
+            return
+        if self.cfg.get("voice", {}).get("mode", "hotkey") != "hotkey":
+            return
+        if backend.blackhole_installed() or not backend.blackhole_pkg_path():
+            return
+        r = QMessageBox.question(
+            self, APP_NAME,
+            "「轉給其他語音輸入 App」模式需要安裝虛擬麥克風「BlackHole」才能把遙控器的聲音送進去。\n\n"
+            "要現在安裝嗎？（會開啟安裝程式，需要輸入你的 Mac 管理員密碼）\n\n"
+            "若你只想用「內建辨識」打字，可以不裝，直接到語音鍵設定改成「內建」即可。",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if r == QMessageBox.Yes:
+            if backend.install_blackhole():
+                QMessageBox.information(
+                    self, APP_NAME,
+                    "已開啟 BlackHole 安裝程式，請依指示安裝（輸入管理員密碼）。\n"
+                    "裝好後不需重開，直接按住遙控器語音鍵說話即可。")
+            else:
+                QMessageBox.warning(self, APP_NAME, "找不到內建的 BlackHole 安裝程式。")
 
     # ---- UI ----
     def _build(self):

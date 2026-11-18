@@ -9,3 +9,4 @@ dist/
 *.egg-info/
 config.toml
 playremote.log
+installer/vendor/

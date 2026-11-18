@@ -116,3 +116,29 @@ def open_path(path):
 
 # macOS 走藍牙配對（USB 接收器免配對；Windows 用系統原生配對流程）
 BLE_PAIR = IS_MAC
+
+
+# ---------------- BlackHole 虛擬麥克風（macOS hotkey 模式用） ----------------
+def blackhole_installed() -> bool:
+    """BlackHole 2ch 的 HAL 驅動存在就算裝了。"""
+    return IS_MAC and Path("/Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver").exists()
+
+
+def blackhole_pkg_path() -> "Path | None":
+    """打包進 app 的 BlackHole 安裝程式路徑（找不到回傳 None）。"""
+    base = Path(getattr(sys, "_MEIPASS", HERE))
+    for p in (base / "vendor" / "BlackHole2ch-0.7.1.pkg",
+              HERE / "installer" / "vendor" / "BlackHole2ch-0.7.1.pkg"):
+        if p.exists():
+            return p
+    return None
+
+
+def install_blackhole() -> bool:
+    """用系統安裝程式打開內建的 BlackHole pkg（會要管理員密碼）。回傳是否有啟動安裝程式。"""
+    pkg = blackhole_pkg_path()
+    if not pkg:
+        return False
+    import subprocess
+    subprocess.Popen(["open", str(pkg)])
+    return True
