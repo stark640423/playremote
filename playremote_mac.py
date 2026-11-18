@@ -487,12 +487,15 @@ class Driver:
                     self._voice_mic_on = True
                 combo = self.voice.get("hotkey", "fn")
                 style = self.voice.get("hotkey_style", "hold")
+                ax = macio.accessibility_trusted()
                 self._voice_combo = macio.parse_combo(combo)
                 if style == "hold":
                     macio.key_down(self._voice_combo)
                 else:
                     macio.send_keys(combo)
                     self._voice_combo = None
+                log(f"  送熱鍵 {combo}（{style}）給語音輸入 App；輔助使用: "
+                    + ("已授權" if ax else "未授權←送鍵會被系統擋掉，SogaType 收不到"))
             except Exception as e:  # noqa: BLE001
                 log(f"  語音 hotkey 啟動失敗：{e}")
 

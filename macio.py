@@ -69,6 +69,15 @@ def parse_combo(combo: str) -> Combo:
     return Combo(mods, key, media)
 
 
+def accessibility_trusted() -> bool:
+    """是否有「輔助使用」權限（送鍵給其他 App 要用）。拿不到就當有，避免誤報。"""
+    try:
+        from ApplicationServices import AXIsProcessTrusted
+        return bool(AXIsProcessTrusted())
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _post_key(keycode: int, down: bool, flags: int = 0):
     ev = Quartz.CGEventCreateKeyboardEvent(None, keycode, down)
     Quartz.CGEventSetFlags(ev, flags if down else 0)
