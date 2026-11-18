@@ -719,6 +719,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, f"設定開機自啟失敗：{e}")
 
 def main():
+    # 自我檢測：確認打包後 bleak 的 CoreBluetooth ObjC 類別有被正確打包（alloc 存在）。
+    # 發布前可用 `PlayRemote --selftest-ble` 驗證，避免再出現「CentralManagerDelegate has no attribute alloc」。
+    if len(sys.argv) >= 2 and sys.argv[1] == "--selftest-ble":
+        try:
+            from bleak.backends.corebluetooth.CentralManagerDelegate import CentralManagerDelegate
+            import CoreBluetooth, libdispatch  # noqa: F401  確認 ObjC framework 有打包進來
+            ok = hasattr(CentralManagerDelegate, "alloc")
+            print("BLE selftest:", "OK" if ok else "FAIL (no alloc)")
+            sys.exit(0 if ok else 2)
+        except Exception as e:  # noqa: BLE001
+            print(f"BLE selftest ERROR: {type(e).__name__}: {e}")
+            sys.exit(3)
     # 子程序模式：被驅動呼叫來跑離線辨識（自己的 main thread + run loop，Speech 回呼才收得到）。
     # 必須在建 QApplication 之前處理，純 CLI、不開視窗。
     if len(sys.argv) >= 3 and sys.argv[1] == "--stt":

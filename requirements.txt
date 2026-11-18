@@ -1,8 +1,14 @@
-bleak>=1.0
-pyobjc-framework-Speech; sys_platform == "darwin"
-pyobjc-framework-Quartz; sys_platform == "darwin"
+# 版本釘死，確保 CI（打包）和本機（已驗證）一致 —— bleak 的 CoreBluetooth(ATVV) 很吃 pyobjc 版本
+bleak==1.1.1
 sounddevice
 numpy
-pycaw; sys_platform == "win32"
 PySide6
 tomli; python_version < "3.11"
+pycaw; sys_platform == "win32"
+# macOS：pyobjc 全部釘 11.1（bleak 的 CoreBluetooth / libdispatch 要跟著一起打包，版本不一致會讓 ObjC 類別註冊失敗）
+pyobjc-core==11.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==11.1; sys_platform == "darwin"
+pyobjc-framework-CoreBluetooth==11.1; sys_platform == "darwin"
+pyobjc-framework-libdispatch==11.1; sys_platform == "darwin"
+pyobjc-framework-Speech==11.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==11.1; sys_platform == "darwin"
